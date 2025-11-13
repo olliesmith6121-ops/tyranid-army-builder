@@ -1,0 +1,192 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta http-equiv="Content-Style-Type" content="text/css">
+  <title></title>
+  <meta name="Generator" content="Cocoa HTML Writer">
+  <meta name="CocoaVersion" content="2113.65">
+  <style type="text/css">
+    p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica}
+    p.p2 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica; min-height: 14.0px}
+  </style>
+</head>
+<body>
+<p class="p1">&lt;!DOCTYPE html&gt;</p>
+<p class="p1">&lt;html lang="en"&gt;</p>
+<p class="p1">&lt;head&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;meta charset="UTF-8"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;meta name="viewport" content="width=device-width, initial-scale=1.0"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;title&gt;Tyranid Army Builder | Legions Imperialis&lt;/title&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;!-- Load Tailwind CSS --&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;script src="https://cdn.tailwindcss.com"&gt;&lt;/script&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;!-- Load Lucide Icons for React/HTML --&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"&gt;&lt;/script&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;style&gt;</p>
+<p class="p1"><span class="Apple-converted-space">        </span>.custom-scrollbar::-webkit-scrollbar { width: 8px; }</p>
+<p class="p1"><span class="Apple-converted-space">        </span>.custom-scrollbar::-webkit-scrollbar-thumb { background-color: #4a5568; border-radius: 4px; }</p>
+<p class="p1"><span class="Apple-converted-space">        </span>.custom-scrollbar::-webkit-scrollbar-track { background-color: #1a202c; }</p>
+<p class="p1"><span class="Apple-converted-space">        </span>.modal-backdrop { background-color: rgba(0,0,0,0.8); backdrop-filter: blur(4px);}</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;/style&gt;</p>
+<p class="p1">&lt;/head&gt;</p>
+<p class="p1">&lt;body class="bg-gray-900 text-gray-100 font-sans min-h-screen p-4 md:p-8"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;div id="app" class="max-w-7xl mx-auto border-t-4 border-gray-900"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">        </span>&lt;header class="text-center mb-8"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;h1 class="text-4xl md:text-5xl font-extrabold text-teal-400 tracking-tight"&gt;Hive Fleet Roster Builder&lt;/h1&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;p class="text-gray-400 mt-2"&gt;Legions Imperialis: Tyranids (Hive War)&lt;/p&gt;</p>
+<p class="p1"><span class="Apple-converted-space">        </span>&lt;/header&gt;</p>
+<p class="p1"><span class="Apple-converted-space">        </span>&lt;div class="grid grid-cols-1 lg:grid-cols-3 gap-8"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;div class="lg:col-span-1 space-y-8"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;div class="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div class="flex justify-between items-center mb-4"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>&lt;h2 class="text-2xl font-bold text-gray-200"&gt;Roster Summary&lt;/h2&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>&lt;span id="points-display" class="text-4xl font-extrabold text-red-500"&gt;0&lt;/span&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div class="border-t border-gray-700 pt-4"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>&lt;label for="detachment-select" class="block text-sm font-medium text-gray-400 mb-2"&gt;Select Swarm Formation&lt;/label&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>&lt;select id="detachment-select" class="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 focus:ring-teal-500 focus:border-teal-500 transition duration-150"&gt;&lt;/select&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>&lt;div id="detachment-rules" class="mt-3 p-3 bg-gray-700 rounded-lg text-sm text-gray-300 transition duration-300"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                            </span>Select a Formation to see its rules and requirements.</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;div class="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;h2 class="text-xl font-bold text-gray-200 mb-3 flex items-center"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>&lt;i data-lucide="shield-check" class="w-5 h-5 mr-2 text-teal-400"&gt;&lt;/i&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>Constraint Validation</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;/h2&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div id="constraint-list" class="space-y-2 custom-scrollbar max-h-60 overflow-y-auto"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>&lt;p class="text-gray-400 text-sm"&gt;Constraints will appear here once a Swarm Formation is selected.&lt;/p&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;div class="lg:col-span-2 space-y-8"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;div class="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;h2 class="text-2xl font-bold text-gray-200 mb-4"&gt;Your Roster &lt;span id="unit-count" class="text-gray-500 text-lg"&gt;(0 Broods)&lt;/span&gt;&lt;/h2&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div id="roster-list" class="space-y-3 custom-scrollbar max-h-96 overflow-y-auto"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                        </span>&lt;p id="empty-roster-message" class="text-gray-500 italic text-center py-4"&gt;Your hive fleet needs more biomass. Add units from below!&lt;/p&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;div class="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;h2 class="text-2xl font-bold text-gray-200 mb-4"&gt;Available Broods (Unit Pool)&lt;/h2&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div id="unit-pool" class="grid grid-cols-1 sm:grid-cols-2 gap-4"&gt;&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">        </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;div id="unit-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden modal-backdrop"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">        </span>&lt;div class="bg-gray-800 p-6 md:p-8 rounded-xl shadow-2xl w-full max-w-lg mx-4 border border-teal-500 transform transition-all duration-300 scale-95 opacity-0" id="modal-content"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;div class="flex justify-between items-start mb-4 border-b border-gray-700 pb-3"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;h3 id="modal-unit-name" class="text-3xl font-bold text-teal-400"&gt;&lt;/h3&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;button onclick="closeUnitModal()" class="text-gray-400 hover:text-red-500 transition duration-150 p-2 -mt-2 -mr-2"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;i data-lucide="x" class="w-6 h-6"&gt;&lt;/i&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;/button&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;div class="space-y-4 custom-scrollbar max-h-96 overflow-y-auto pr-2"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;div class="grid grid-cols-3 gap-3 text-center bg-gray-700 p-3 rounded-lg"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div&gt;&lt;p class="text-xs text-gray-400"&gt;Move&lt;/p&gt;&lt;p id="modal-move" class="font-bold text-lg"&gt;&lt;/p&gt;&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div&gt;&lt;p class="text-xs text-gray-400"&gt;Save&lt;/p&gt;&lt;p id="modal-save" class="font-bold text-lg"&gt;&lt;/p&gt;&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div&gt;&lt;p class="text-xs text-gray-400"&gt;Wounds&lt;/p&gt;&lt;p id="modal-wounds" class="font-bold text-lg"&gt;&lt;/p&gt;&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div&gt;&lt;p class="text-xs text-gray-400"&gt;CAF&lt;/p&gt;&lt;p id="modal-caf" class="font-bold text-lg"&gt;&lt;/p&gt;&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div&gt;&lt;p class="text-xs text-gray-400"&gt;Morale&lt;/p&gt;&lt;p id="modal-morale" class="font-bold text-lg"&gt;&lt;/p&gt;&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div&gt;&lt;p class="text-xs text-gray-400"&gt;Points&lt;/p&gt;&lt;p id="modal-cost" class="font-bold text-lg text-red-400"&gt;&lt;/p&gt;&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;div class="pt-2"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;h4 class="text-lg font-semibold text-gray-200 mb-2 border-b border-gray-700 pb-1"&gt;Special Rules&lt;/h4&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;p id="modal-rules" class="text-sm text-gray-300 italic"&gt;&lt;/p&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;div id="modal-weapons-section"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;h4 class="text-lg font-semibold text-gray-200 mb-2 border-b border-gray-700 pb-1"&gt;Weapons&lt;/h4&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;div id="modal-weapons-list" class="space-y-2"&gt;&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;div id="modal-upgrades-section" class="pt-2"&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;h4 class="text-lg font-semibold text-gray-200 mb-2 border-b border-gray-700 pb-1"&gt;Upgrade Options&lt;/h4&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>&lt;p id="modal-upgrades" class="text-sm text-gray-400"&gt;&lt;/p&gt;</p>
+<p class="p1"><span class="Apple-converted-space">                </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">            </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">        </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;/div&gt;</p>
+<p class="p1"><span class="Apple-converted-space">    </span>&lt;script&gt;</p>
+<p class="p1"><span class="Apple-converted-space">        </span>// --- Core Data Definitions ---</p>
+<p class="p1"><span class="Apple-converted-space">        </span>const WEAPONS = {</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Venom Cannon': { R: '14"', D: 2, TH: '5+', AP: -2, Traits: 'Anti-Tank' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Barbed Strangler': { R: '18"', D: 1, TH: '5+', AP: -1, Traits: 'Barrage, Blast' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Lash Whip &amp; Bone Sword': { R: 'CA', D: 2, TH: '5+', AP: -1, Traits: 'Parry, Reroll CA wounds' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Fleshborer': { R: '6"', D: 3, TH: '5+', AP: 0, Traits: 'Rapid Fire' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Claws and Teeth': { R: 'CA', D: 1, TH: '4+', AP: 0, Traits: 'None' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Heavy Venom Cannon': { R: '18"', D: 3, TH: '5+', AP: -3, Traits: 'Anti-Tank, Heavy' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Scything Talons': { R: 'CA', D: 2, TH: '4+', AP: 0, Traits: 'Reroll CA wounds' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Rending Claws': { R: 'CA', D: 1, TH: '4+', AP: -1, Traits: 'Rending (4+)' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Bio-plasma': { R: '12"', D: 1, TH: '4+', AP: -1, Traits: 'Blast, Lance' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Twin-Linked Devourers': { R: '6"', D: 6, TH: '5+', AP: 0, Traits: 'Rapid Fire' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Tentacled Mass': { R: 'CA', D: 1, TH: '4+', AP: 0, Traits: 'Reroll CA rolls' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Toxic Miasma': { R: '1"', D: 1, TH: '4+', AP: -1, Traits: 'Blast (3"), Ignores Cover' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Trygon Claws': { R: 'CA', D: 2, TH: '4+', AP: -1, Traits: 'Rending (5+)' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Flesh Hook Cannon': { R: '10"', D: 1, TH: '5+', AP: 0, Traits: 'Attract' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Bio-acid Cannon': { R: '18"', D: 2, TH: '4+', AP: -3, Traits: 'Area Attack' },</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Spore Mine Launcher': { R: '18"', D: 1, TH: '4+', AP: 0, Traits: 'Barrage, Blast, Spore Mines' }</p>
+<p class="p1"><span class="Apple-converted-space">        </span>};</p>
+<p class="p2"><br></p>
+<p class="p1"><span class="Apple-converted-space">        </span>const UNITS = {</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Hive Tyrant': {</p>
+<p class="p1"><span class="Apple-converted-space">                </span>id: 'hive-tyrant',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>cost: 100,</p>
+<p class="p1"><span class="Apple-converted-space">                </span>type: 'Synapse Creature Brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>stats: { M: '5"', Sv: '4+', CAF: '+10', Morale: '2+', W: 2 },</p>
+<p class="p1"><span class="Apple-converted-space">                </span>rules: 'Commander, Invulnerable Save (5+), Synapse (12"), Psychic Scream.',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>weapons: ['Venom Cannon', 'Lash Whip &amp; Bone Sword'],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>upgrades: [</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>{ name: 'Add Wings', cost: 20 },</p>
+<p class="p1"><span class="Apple-converted-space">                    </span>{ name: 'The Horror Psychic Power', cost: 15 }</p>
+<p class="p1"><span class="Apple-converted-space">                </span>],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>currentUpgrades: [],</p>
+<p class="p1"><span class="Apple-converted-space">            </span>},</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Termagant Brood': {</p>
+<p class="p1"><span class="Apple-converted-space">                </span>id: 'termagant-brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>cost: 30,</p>
+<p class="p1"><span class="Apple-converted-space">                </span>type: 'Core Brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>stats: { M: '6"', Sv: '6+', CAF: '+0', Morale: '5+', W: 1 },</p>
+<p class="p1"><span class="Apple-converted-space">                </span>rules: 'Instinct: Hunt, Brood Size (4-8 models).',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>weapons: ['Fleshborer', 'Claws and Teeth'],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>upgrades: [{ name: 'Spinefists', cost: 5 },{ name: 'Devourers', cost: 10 }],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>currentUpgrades: [],</p>
+<p class="p1"><span class="Apple-converted-space">            </span>},</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Hormagaunt Brood': {</p>
+<p class="p1"><span class="Apple-converted-space">                </span>id: 'hormagaunt-brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>cost: 35,</p>
+<p class="p1"><span class="Apple-converted-space">                </span>type: 'Core Brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>stats: { M: '8"', Sv: '6+', CAF: '+2', Morale: '5+', W: 1 },</p>
+<p class="p1"><span class="Apple-converted-space">                </span>rules: 'Instinct: Hunt, Brood Size (4-8 models), Deep Strike.',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>weapons: ['Scything Talons'],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>upgrades: [{ name: 'Rending Claws', cost: 10 }],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>currentUpgrades: [],</p>
+<p class="p1"><span class="Apple-converted-space">            </span>},</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Lictor Brood': {</p>
+<p class="p1"><span class="Apple-converted-space">                </span>id: 'lictor-brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>cost: 40,</p>
+<p class="p1"><span class="Apple-converted-space">                </span>type: 'Core Brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>stats: { M: '6"', Sv: '5+', CAF: '+5', Morale: '4+', W: 1 },</p>
+<p class="p1"><span class="Apple-converted-space">                </span>rules: 'Instinct: Hunt, Brood Size (1-3 models), Infiltrate, Hyperactive Nerves.',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>weapons: ['Rending Claws', 'Claws and Teeth'],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>upgrades: [],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>currentUpgrades: [],</p>
+<p class="p1"><span class="Apple-converted-space">            </span>},</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Carnifex Brood': {</p>
+<p class="p1"><span class="Apple-converted-space">                </span>id: 'carnifex-brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>cost: 75,</p>
+<p class="p1"><span class="Apple-converted-space">                </span>type: 'Core Brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>stats: { M: '5"', Sv: '3+', CAF: '+8', Morale: '4+', W: 3 },</p>
+<p class="p1"><span class="Apple-converted-space">                </span>rules: 'Monstrous, Instinct: Hunt, Bio-weapon Synergy.',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>weapons: ['Heavy Venom Cannon', 'Claws and Teeth'],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>upgrades: [{ name: 'Bio-plasma', cost: 15 },{ name: 'Crushing Claws', cost: 10 }],</p>
+<p class="p1"><span class="Apple-converted-space">                </span>currentUpgrades: [],</p>
+<p class="p1"><span class="Apple-converted-space">            </span>},</p>
+<p class="p1"><span class="Apple-converted-space">            </span>'Trygon Brood': {</p>
+<p class="p1"><span class="Apple-converted-space">                </span>id: 'trygon-brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>cost: 120,</p>
+<p class="p1"><span class="Apple-converted-space">                </span>type: 'Synapse Creature Brood',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>stats: { M: '6"', Sv: '3+', CAF: '+12', Morale: '3+', W: 4 },</p>
+<p class="p1"><span class="Apple-converted-space">                </span>rules: 'Monstrous, Synapse (6"), Subterranean Assault.',</p>
+<p class="p1"><span class="Apple-converted-space">                </span>weapons: ['Trygon Claws', 'Tentacled Mass'],</p>
+</body>
+</html>
