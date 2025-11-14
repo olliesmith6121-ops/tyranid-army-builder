@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tyranid Army Builder (V10 - Diagnostic)</title>
+    <title>Tyranid Army Builder (V12 - Final)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom scrollbar for a cleaner look */
@@ -121,7 +121,7 @@
         let armyInfo = {
             name: "New Tyranid Army"
         };
-        let army = []; // This holds all detachment objects
+        let army = []; 
         let detachmentIdCounter = 0;
 
         // ====================================================================
@@ -164,7 +164,6 @@
         }
 
         function addDetachment() {
-            console.log("DIAGNOSTIC: addDetachment() function called.");
             detachmentIdCounter++;
             army.push({
                 id: detachmentIdCounter,
@@ -172,7 +171,6 @@
                 formation: null,
                 slots: {}
             });
-            console.log("DIAGNOSTIC: Army object updated. Calling renderArmy().");
             renderArmy();
         }
 
@@ -239,8 +237,11 @@
         // ====================================================================
         
         function renderArmyHeader() {
-            document.getElementById('total-points').textContent = calculateTotalPoints();
-            document.getElementById('detachment-count').textContent = army.length;
+            const totalPointsEl = document.getElementById('total-points');
+            const detachmentCountEl = document.getElementById('detachment-count');
+            
+            if (totalPointsEl) totalPointsEl.textContent = calculateTotalPoints();
+            if (detachmentCountEl) detachmentCountEl.textContent = army.length;
         }
         
         function renderSlot(detachmentId, slot) {
@@ -364,25 +365,37 @@
         
         // Main render function: re-draws everything
         function renderArmy() {
-            console.log("DIAGNOSTIC: renderArmy() started.");
             const armyContainer = document.getElementById('detachment-area');
-            const emptyMessage = document.getElementById('empty-army-message');
+            const emptyMessage = document.getElementById('empty-army-message'); // This element is destroyed on the first render!
+
+            // Safety check for the main container
+            if (!armyContainer) {
+                console.error("CRITICAL ERROR: Detachment area container (#detachment-area) not found.");
+                return; 
+            }
 
             if (army.length === 0) {
-                armyContainer.innerHTML = '';
-                emptyMessage.style.display = 'block';
+                // If army is empty, make sure the empty message is visible.
+                if (emptyMessage) {
+                    armyContainer.innerHTML = '';
+                    emptyMessage.style.display = 'block';
+                } else {
+                    // If emptyMessage was destroyed, re-insert the message to prompt the user
+                    armyContainer.innerHTML = '<div class="text-gray-500 text-center py-8 bg-white rounded-lg shadow-md" id="empty-army-message">Click "Add New Detachment" to begin building your army.</div>';
+                }
             } else {
-                emptyMessage.style.display = 'none';
+                // This is the key fix: use Optional Chaining to prevent the crash
+                // when emptyMessage is null (which it will be after the first render).
+                emptyMessage?.style.display = 'none';
+
                 try {
                     armyContainer.innerHTML = army.map(renderDetachment).join('');
-                    console.log("DIAGNOSTIC: HTML successfully generated and inserted into DOM.");
                 } catch (e) {
                     console.error("CRITICAL ERROR DURING RENDERING:", e);
                 }
             }
             
             renderArmyHeader();
-            console.log("DIAGNOSTIC: renderArmy() finished.");
         }
 
         // Initialize the app
