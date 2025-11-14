@@ -1,1049 +1,437 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tyranid Army Builder (V30 - Repeater Weapons & Brood Size)</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* Custom scrollbar for a cleaner look */
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background-color: #6d28d9; /* Indigo-700 */
-            border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background-color: #e5e7eb; /* Gray-200 */
-        }
-        /* Style for the fixed options panel */
-        #unit-options-panel {
-            position: fixed;
-            top: 0;
-            right: 0;
-            width: 380px;
-            height: 100%;
-            background-color: #f9fafb; /* Gray-50 */
-            box-shadow: -4px 0 10px rgba(0, 0, 0, 0.1);
-            z-index: 50;
-            transform: translateX(380px);
-            transition: transform 0.3s ease-out;
-            overflow-y: auto;
-        }
-        #unit-options-panel.open {
-            transform: translateX(0);
-        }
-    </style>
-</head>
-<body class="bg-gray-100 font-sans p-4">
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { LogOut, Plus, Trash2, Edit2, Check, X, Users, Zap, Hash, ChevronsUp, ChevronsDown, Minus } from 'lucide-react';
 
-    <div id="app" class="max-w-7xl mx-auto">
-        
-        <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
-            <h1 class="text-3xl font-bold text-gray-800 mb-4">Army Info</h1>
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                <div class="md:col-span-2">
-                    <label for="army-name" class="block text-sm font-medium text-gray-700">Army Name</label>
-                    <input type="text" id="army-name" onchange="window.updateArmyName(this.value)"
-                           class="mt-1 block w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                           value="New Tyranid Army">
+// --- MOCK DATA & CONFIG ---
+// Global variables provided by the Canvas environment
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// Mock data for Swarms to populate the dropdown
+const MOCK_SWARMS = [
+  { id: 'hgaunts', name: 'Hormagaunts', points: 50, traits: 'Horde, Melee' },
+  { id: 'tgaunts', name: 'Termagants', points: 55, traits: 'Horde, Ranged' },
+  { id: 'gargoyles', name: 'Gargoyles', points: 60, pointsPerModel: 12, traits: 'Fly, Fast' },
+  { id: 'lictor', name: 'Lictor', pointsPerModel: 75, traits: 'Infiltrate, Stealth' },
+  { id: 'warrior', name: 'Tyranid Warrior', pointsPerModel: 20, traits: 'Synapse, Durable' },
+];
+
+const swarmTypeToIcon = (type) => {
+  switch (type) {
+    case 'hgaunts': return <Zap className="w-4 h-4 text-pink-500" />;
+    case 'tgaunts': return <Hash className="w-4 h-4 text-blue-500" />;
+    case 'gargoyles': return <ChevronsUp className="w-4 h-4 text-green-500" />;
+    case 'lictor': return <Users className="w-4 h-4 text-red-500" />;
+    case 'warrior': return <ChevronsDown className="w-4 h-4 text-purple-500" />;
+    default: return <Plus className="w-4 h-4 text-gray-400" />;
+  }
+};
+
+const getModelPoints = (typeId) => {
+    // Finds the base points per model. If not specified, calculates based on a default squad size of 5 for MOCK_SWARMS base points.
+    const swarm = MOCK_SWARMS.find(s => s.id === typeId);
+    // Use pointsPerModel if available, otherwise default to a calculated value or 10.
+    return swarm?.pointsPerModel || Math.ceil(swarm?.points / 5) || 10;
+};
+
+// --- FIREBASE INITIALIZATION & STATE ---
+function App() {
+  const [db, setDb] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+
+  // Brood State
+  const [brood, setBrood] = useState(null);
+  const [broodName, setBroodName] = useState('');
+  const [isEditingName, setIsEditingName] = useState(false);
+
+  // New Swarm State (User Request)
+  const [selectedSwarmId, setSelectedSwarmId] = useState('');
+
+  // UI State
+  const [loading, setLoading] = useState(true);
+  const [snackbarMessage, setSnackbarMessage] = useState(null);
+
+  // Firebase Initialization and Authentication
+  useEffect(() => {
+    if (!firebaseConfig) {
+      console.error("Firebase config is missing.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const app = initializeApp(firebaseConfig);
+      const firestore = getFirestore(app);
+      const firebaseAuth = getAuth(app);
+
+      setDb(firestore);
+      setAuth(firebaseAuth);
+
+      const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+        if (!user) {
+          try {
+            if (initialAuthToken) {
+              await signInWithCustomToken(firebaseAuth, initialAuthToken);
+            } else {
+              await signInAnonymously(firebaseAuth);
+            }
+          } catch (error) {
+            console.error("Authentication error:", error);
+          }
+        }
+        setUserId(firebaseAuth.currentUser?.uid || 'anonymous');
+        setIsAuthReady(true);
+      });
+
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Error initializing Firebase:", error);
+      setLoading(false);
+    }
+  }, []);
+
+  // Firestore Data Listener
+  useEffect(() => {
+    if (!isAuthReady || !db || !userId) return;
+
+    // Use a fixed Brood ID for simplicity in this single-user app structure
+    const broodId = 'my-hive-fleet-brood';
+    // Path: /artifacts/{appId}/users/{userId}/broods/{broodId}
+    const broodDocRef = doc(db, `artifacts/${appId}/users/${userId}/broods`, broodId);
+
+    const unsubscribe = onSnapshot(broodDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setBrood(data);
+        setBroodName(data.name || 'New Brood');
+      } else {
+        // Create initial brood document if it doesn't exist
+        setBrood(null);
+        setBroodName('New Brood');
+        // Will be created on first save/add
+      }
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching brood data:", error);
+      setLoading(false);
+      setSnackbarMessage({ text: 'Failed to load data. Check console for details.', type: 'error' });
+    });
+
+    return () => unsubscribe();
+  }, [isAuthReady, db, userId, appId]);
+
+  // --- HANDLERS ---
+
+  const createOrUpdateBrood = async (updateData) => {
+    if (!db || !userId || !isAuthReady) return;
+    const broodId = 'my-hive-fleet-brood';
+    const broodDocRef = doc(db, `artifacts/${appId}/users/${userId}/broods`, broodId);
+
+    const baseData = {
+        name: broodName,
+        swarms: brood?.swarms || [],
+        createdAt: brood?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    };
+
+    try {
+        if (!brood) {
+            // Document creation (setDoc with merge: true for safety)
+            await setDoc(broodDocRef, { ...baseData, ...updateData }, { merge: true });
+        } else {
+            // Document update
+            await updateDoc(broodDocRef, updateData);
+        }
+        return true;
+    } catch (error) {
+        console.error("Error updating brood:", error);
+        setSnackbarMessage({ text: 'Failed to save changes. Please try again.', type: 'error' });
+        return false;
+    }
+  };
+
+  const handleNameSave = async () => {
+    if (!broodName.trim()) {
+      setSnackbarMessage({ text: 'Brood name cannot be empty.', type: 'error' });
+      return;
+    }
+    const success = await createOrUpdateBrood({ name: broodName.trim() });
+    if (success) setIsEditingName(false);
+  };
+
+  const handleAddSwarm = async () => {
+    if (!db || !userId) return;
+
+    if (!selectedSwarmId) {
+        setSnackbarMessage({ text: 'Please select a Swarm type first.', type: 'error' });
+        return;
+    }
+
+    const swarmData = MOCK_SWARMS.find(s => s.id === selectedSwarmId);
+    if (!swarmData) {
+        setSnackbarMessage({ text: 'Invalid Swarm type selected.', type: 'error' });
+        return;
+    }
+
+    const newSwarm = {
+        id: crypto.randomUUID(), // Unique ID for this instance
+        typeId: swarmData.id,
+        name: swarmData.name,
+        // Using pointsPerModel for accurate calculation, falling back to base points for display/initial logic
+        points: swarmData.points || swarmData.pointsPerModel * 5, 
+        traits: swarmData.traits,
+        size: 5, // Default starting size
+        pointsPerModel: getModelPoints(swarmData.id) // Calculate and store points per model
+    };
+
+    const success = await createOrUpdateBrood({ swarms: arrayUnion(newSwarm) });
+    if (success) {
+        // Clear the dropdown after adding
+        setSelectedSwarmId('');
+        setSnackbarMessage({ text: `${swarmData.name} added successfully!`, type: 'success' });
+    }
+  };
+
+  const handleDeleteSwarm = async (swarmId) => {
+    if (!brood) return;
+
+    const swarmToRemove = brood.swarms.find(s => s.id === swarmId);
+    if (!swarmToRemove) return;
+
+    const success = await createOrUpdateBrood({ swarms: arrayRemove(swarmToRemove) });
+    if (success) {
+        setSnackbarMessage({ text: `${swarmToRemove.name} removed.`, type: 'info' });
+    }
+  };
+
+  const handleSizeChange = async (swarmId, delta) => {
+    if (!brood) return;
+
+    const updatedSwarms = brood.swarms.map(s => {
+      if (s.id === swarmId) {
+        const newSize = Math.max(0, s.size + delta); // Min size 0
+        return { ...s, size: newSize };
+      }
+      return s;
+    }).filter(s => s.size > 0); // Remove swarm if size hits zero
+
+    // Only update if the list is different (i.e., size changed or swarm was removed)
+    if (JSON.stringify(updatedSwarms) !== JSON.stringify(brood.swarms)) {
+        const success = await createOrUpdateBrood({ swarms: updatedSwarms });
+        if (success) {
+            if (updatedSwarms.length < brood.swarms.length) {
+                 setSnackbarMessage({ text: `Swarm removed as size reached 0.`, type: 'info' });
+            }
+        }
+    }
+  };
+
+  // --- CALCULATED VALUES ---
+
+  const totalBroodPoints = useMemo(() => {
+    if (!brood?.swarms) return 0;
+    return brood.swarms.reduce((total, swarm) => {
+      // Points calculation: Points Per Model * current size
+      // Use the stored pointsPerModel value
+      const pointsPerModel = swarm.pointsPerModel; 
+      return total + (pointsPerModel * swarm.size);
+    }, 0);
+  }, [brood]);
+
+
+  // --- UI COMPONENTS ---
+
+  const Snackbar = ({ message, type }) => {
+    useEffect(() => {
+      if (message) {
+        const timer = setTimeout(() => setSnackbarMessage(null), 3000);
+        return () => clearTimeout(timer);
+      }
+    }, [message]);
+
+    if (!message) return null;
+
+    const baseStyle = "fixed bottom-5 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl text-white font-semibold transition-opacity duration-300 z-50";
+    const typeStyle = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-indigo-600';
+
+    return (
+      <div className={`${baseStyle} ${typeStyle}`}>
+        {message.text}
+      </div>
+    );
+  };
+
+  const BroodCard = ({ swarm }) => {
+      // Calculate points for this specific card using the stored value (minor clarity update)
+      const pointsPerModel = swarm.pointsPerModel; 
+      const cardPoints = pointsPerModel * swarm.size;
+
+    return (
+      <div className="bg-white p-4 rounded-xl shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between transition duration-300 hover:shadow-xl border border-gray-100">
+        <div className="flex items-center gap-3 mb-3 sm:mb-0">
+          <div className="p-2 bg-gray-100 rounded-full flex-shrink-0">
+            {swarmTypeToIcon(swarm.typeId)}
+          </div>
+          <div>
+            <div className="text-lg font-bold text-gray-800">{swarm.name}</div>
+            <div className="text-sm text-gray-500 font-mono italic">{swarm.traits}</div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+            {/* Size Control */}
+            <div className="flex items-center space-x-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                <button
+                    onClick={() => handleSizeChange(swarm.id, -1)}
+                    className="p-1 bg-red-100 text-red-600 rounded-full hover:bg-red-200 transition disabled:opacity-30"
+                    disabled={swarm.size <= 0}
+                    title="Decrease Size by 1 (Min 0)"
+                >
+                    <Minus className="w-4 h-4" />
+                </button>
+                <span className="text-base font-semibold text-gray-700 w-10 text-center">Size: {swarm.size}</span>
+                <button
+                    onClick={() => handleSizeChange(swarm.id, 1)}
+                    className="p-1 bg-green-100 text-green-600 rounded-full hover:bg-green-200 transition"
+                    title="Increase Size by 1"
+                >
+                    <Plus className="w-4 h-4" />
+                </button>
+            </div>
+
+            {/* Points and Delete */}
+            <div className="text-lg font-bold text-indigo-600 mr-2 min-w-[70px] text-right">{cardPoints} pts</div>
+            <button
+              onClick={() => handleDeleteSwarm(swarm.id)}
+              className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition shadow-md flex-shrink-0"
+              title="Remove Swarm"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+        </div>
+      </div>
+    );
+  };
+
+
+  if (loading || !isAuthReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-2xl font-semibold text-indigo-600 animate-pulse">Loading Hive Fleet Data...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-[Inter]">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-4xl font-extrabold text-gray-900 mb-2 flex items-center">
+          <img src="https://placehold.co/40x40/500096/ffffff?text=H" onError={(e)=>{e.target.onerror=null; e.target.src='https://placehold.co/40x40/500096/ffffff?text=H'}} alt="Hive Icon" className="mr-3 rounded-md" />
+          Hive War Brood Builder
+        </h1>
+        <p className="text-gray-500 mb-6">User ID: <span className='font-mono text-xs break-all'>{userId}</span></p>
+
+        {/* --- TOP SECTION: Brood Info & Swarm Addition --- */}
+        <div className="bg-white p-5 shadow-2xl rounded-xl border-4 border-indigo-600 mb-8">
+            <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Brood Configuration</h2>
+
+            {/* Row 1: Brood Name and Points */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                <div className="flex items-center flex-grow">
+                    {isEditingName ? (
+                        <>
+                            <input
+                                type="text"
+                                value={broodName}
+                                onChange={(e) => setBroodName(e.target.value)}
+                                className="flex-grow p-2 border border-indigo-300 rounded-l-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 text-lg font-semibold"
+                            />
+                            <button
+                                onClick={handleNameSave}
+                                className="p-2 bg-green-500 text-white rounded-r-lg hover:bg-green-600 transition"
+                                title="Save Name"
+                            >
+                                <Check className="w-6 h-6" />
+                            </button>
+                            <button
+                                onClick={() => { setIsEditingName(false); setBroodName(brood?.name || 'New Brood'); }}
+                                className="p-2 bg-gray-500 text-white ml-2 rounded-lg hover:bg-gray-600 transition"
+                                title="Cancel Edit"
+                            >
+                                <X className="w-6 h-6" />
+                            </button>
+                        </>
+                    ) : (
+                        <div className="flex items-center">
+                            <span className="text-2xl font-bold text-gray-900 mr-3">{broodName}</span>
+                            <button
+                                onClick={() => setIsEditingName(true)}
+                                className="p-1 bg-indigo-100 text-indigo-600 rounded-full hover:bg-indigo-200 transition"
+                                title="Edit Name"
+                            >
+                                <Edit2 className="w-5 h-5" />
+                            </button>
+                        </div>
+                    )}
                 </div>
-                <div class="p-3 bg-indigo-50 rounded-lg shadow-inner">
-                    <div class="text-sm font-medium text-indigo-700">Total Army Points</div>
-                    <div id="total-points" class="text-3xl font-bold text-indigo-900">0</div>
-                </div>
-                <div class="p-3 bg-indigo-50 rounded-lg shadow-inner">
-                    <div class="text-sm font-medium text-indigo-700">Detachments</div>
-                    <div id="detachment-count" class="text-3xl font-bold text-indigo-900">0</div>
+                <div className="flex-shrink-0 text-2xl font-extrabold text-indigo-700 bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-300">
+                    Total Points: <span className="font-mono">{totalBroodPoints}</span>
                 </div>
             </div>
-            
-            <div class="mt-6 border-t pt-4 flex items-center space-x-4">
-                <label for="new-formation-select" class="block text-sm font-medium text-gray-700 whitespace-nowrap">Formation Type:</label>
-                <select id="new-formation-select" 
-                        onchange="window.updateSelectedFormation(this.value)"
-                        class="p-2 border border-indigo-400 rounded-lg bg-white font-semibold text-sm focus:ring-indigo-500 focus:border-indigo-500 w-full md:w-auto">
-                    </select>
 
-                 <button onclick="window.addSelectedDetachment()" 
-                         id="add-detachment-button" 
-                         disabled
-                         class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition duration-150 shadow-md disabled:bg-indigo-300">
-                    + Add New Detachment
+            {/* Row 2: Swarm Selection and Add Button */}
+            <div className="flex flex-col sm:flex-row gap-4 items-stretch pt-4 border-t border-gray-100">
+                <select
+                    value={selectedSwarmId}
+                    onChange={(e) => setSelectedSwarmId(e.target.value)}
+                    className="flex-grow p-3 border border-gray-300 rounded-lg bg-white text-gray-700 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"
+                >
+                    <option value="" disabled>Select Swarm Type to Add...</option>
+                    {MOCK_SWARMS.map(swarm => (
+                        <option key={swarm.id} value={swarm.id}>
+                            {swarm.name} ({getModelPoints(swarm.id)} pts/model) - {swarm.traits}
+                        </option>
+                    ))}
+                </select>
+
+                <button
+                    onClick={handleAddSwarm}
+                    disabled={!selectedSwarmId}
+                    className="flex-shrink-0 flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                >
+                    <Plus className="w-5 h-5" />
+                    Add Swarm
                 </button>
             </div>
         </div>
 
-        <div id="detachment-area" class="space-y-6">
-            <div class="text-gray-500 text-center py-8 bg-white rounded-lg shadow-md" id="empty-army-message">
-                Select a formation type and click "Add New Detachment" to begin building your army.
+
+        {/* --- SWARM LIST --- */}
+        <h2 className="text-3xl font-bold text-gray-800 mb-4">Brood Swarms ({brood?.swarms?.length || 0})</h2>
+
+        <div className="space-y-4">
+          {brood?.swarms && brood.swarms.length > 0 ? (
+            brood.swarms.map(swarm => (
+              <BroodCard key={swarm.id} swarm={swarm} />
+            ))
+          ) : (
+            <div className="text-center p-10 bg-white rounded-xl border-dashed border-2 border-gray-300 text-gray-500">
+              <Zap className='w-10 h-10 mx-auto mb-4 text-gray-400' />
+              <p className='text-lg font-medium'>Your Brood is empty.</p>
+              <p>Add a Swarm using the selector above!</p>
             </div>
+          )}
         </div>
+
+      </div>
+      <Snackbar message={snackbarMessage} type={snackbarMessage?.type} />
     </div>
-    
-    <div id="unit-options-panel">
-        </div>
+  );
+}
 
-    <script>
-        // ====================================================================
-        // 1. DATA
-        // ====================================================================
-        
-        // Custom sort order for categories
-        const CATEGORY_SORT_ORDER = {
-            'Synapse': 1, 
-            'Core': 2, 
-            'Transport': 3,
-            'Flyer': 4,
-            'Biotitan': 5,
-            'Special': 99 
-        };
-
-        // Icons placeholder (using Emoji for unit visualization)
-        const UNIT_ICONS = {
-            'Synapse': '🧠', 
-            'Core': '🐜', 
-            'Transport': '🛡️', 
-            'Biotitan': '🔥', 
-            'Flyer': '🦅', 
-            'Special': '⭐'
-        };
-
-        const DEFAULT_OPTIONS = { hasOptions: false };
-
-        // Detailed Upgrade Data Integrated
-        const AVAILABLE_UNITS = [
-            // Synapse Units
-            { name: "Hive Tyrant", category: "Synapse", points: 200, rules: [], options: DEFAULT_OPTIONS },
-            { name: "Neurotyrant", category: "Synapse", points: 190, rules: [], options: DEFAULT_OPTIONS },
-            { name: "Zoanthrope Brood", category: "Synapse", points: 80, rules: [], 
-                options: { 
-                    hasOptions: true, 
-                    type: 'Brood',
-                    data: { // Brood size managed by repeater
-                        broodSize: {
-                            label: 'Increase Brood Size',
-                            type: 'repeater',
-                            sizePerAdd: 2,
-                            pointsPerAdd: 20,
-                            maxAdds: 3, // Start 1 model, max 7 (1+2+2+2)
-                        }
-                    } 
-                } 
-            }, 
-            
-            // Core Units
-            { name: "Termagants", category: "Core", points: 60, rules: [], 
-                options: { 
-                    hasOptions: true, 
-                    type: 'Weapons',
-                    data: { 
-                        weapon: { 
-                            label: 'Weapon Biomorph Upgrade (1 per unit)', 
-                            type: 'dropdown', 
-                            items: [
-                                { name: "Spinefist", points: 5 },
-                                { name: "Devourer", points: 10 }
-                            ]
-                        }
-                    }
-                } 
-            }, 
-            { name: "Hormagaunts", category: "Core", points: 70, rules: [], options: DEFAULT_OPTIONS },
-            { name: "Tyranid Warriors", category: "Core", points: 100, rules: [], options: DEFAULT_OPTIONS },
-            { name: "Ripperswarm Brood", category: "Core", points: 40, rules: [], 
-                options: { 
-                    hasOptions: true, 
-                    type: 'Brood',
-                    data: {
-                        broodSize: {
-                            label: 'Increase Brood Size',
-                            type: 'repeater',
-                            sizePerAdd: 1,
-                            pointsPerAdd: 15,
-                            maxAdds: 5, // Example max adds, assuming base 1, max 6
-                        }
-                    }
-                } 
-            }, 
-            
-            // Transport
-            { name: "Tyrant Guard", category: "Transport", points: 150, rules: [], options: DEFAULT_OPTIONS },
-            
-            // NEW UNIT: Hive Guard (Repeater Weapon Example)
-            { name: "Hive Guard", category: "Core", points: 50, rules: [], 
-                options: { 
-                    hasOptions: true, 
-                    type: 'Weapons',
-                    data: {
-                        weaponRepeater: {
-                            label: 'Add Weapon Biomorph',
-                            type: 'weaponRepeater', // New type for multi-select weapons
-                            baseCount: 1, // Unit starts with 1 model/weapon (50pts)
-                            maxTotal: 6, // Max models/weapons is 6
-                            items: [
-                                { name: "Impaler Cannon", points: 20 },
-                                { name: "Shock Cannon", points: 25 }
-                            ]
-                        }
-                    }
-                }
-            },
-            
-            // Biotitan Units
-            { name: "Hierophant", category: "Biotitan", points: 800, rules: [], 
-                options: { 
-                    hasOptions: true, 
-                    type: 'Weapons',
-                    data: { 
-                        weapon1: { 
-                            label: 'Main Weapon 1', 
-                            type: 'dropdown', 
-                            items: [
-                                { name: "Bio Cannon", points: 20 },
-                                { name: "Bile Launcher", points: 20 },
-                                { name: "Razor Claws", points: 0 }, 
-                                { name: "Pyro-Acid Spray", points: 10 }
-                            ]
-                        },
-                        weapon2: { 
-                            label: 'Main Weapon 2 (Can be the same)', 
-                            type: 'dropdown', 
-                            items: [
-                                { name: "Bio Cannon", points: 20 },
-                                { name: "Bile Launcher", points: 20 },
-                                { name: "Razor Claws", points: 0 },
-                                { name: "Pyro-Acid Spray", points: 10 }
-                            ]
-                        }
-                    }
-                } 
-            }, 
-            { name: "Harridan", category: "Biotitan", points: 750, rules: [], options: DEFAULT_OPTIONS },
-            
-            // Flyer Units
-            { name: "Mawloc", category: "Flyer", points: 170, rules: [], options: DEFAULT_OPTIONS },
-            { name: "Harpy", category: "Flyer", points: 190, rules: [], options: DEFAULT_OPTIONS },
-            { name: "Trygon Brood", category: "Flyer", points: 110, rules: [], 
-                options: { 
-                    hasOptions: true, 
-                    type: 'Model',
-                    data: {
-                        primeUpgrade: {
-                            label: 'Upgrade to Trygon Prime',
-                            type: 'toggle',
-                            points: 60,
-                            limit: 1 
-                        }
-                    }
-                } 
-            }, 
-        ];
-        
-        const SWARM_FORMATIONS = [
-            {
-                name: "Assault Swarm",
-                slots: [
-                    { type: 'Mandatory', category: 'Synapse', max: 1 },
-                    { type: 'Mandatory', category: 'Core', max: 3 },
-                    { type: 'Mandatory', category: 'Transport', max: 1 },
-                    { type: 'Optional', category: 'Synapse', max: 2 },
-                    { type: 'Optional', category: 'Core', max: 6 },
-                    { type: 'Optional', category: 'Flyer', max: 2 }
-                ]
-            },
-            {
-                name: "Bio-Titan Swarm",
-                slots: [
-                    { type: 'Mandatory', category: 'Biotitan', max: 3 },
-                    { type: 'Optional', category: 'Biotitan', max: 3 }
-                ]
-            },
-            {
-                name: "Synaptic Swarm",
-                slots: [
-                    { type: 'Mandatory', category: 'Synapse', max: 1 },
-                    { type: 'Mandatory', category: 'Core', max: 3 },
-                    { type: 'Optional', category: 'Synapse', max: 2 },
-                    { type: 'Optional', category: 'Core', max: 6 },
-                    { type: 'Optional', label: 'Biotitan or Flyer', category: ['Biotitan', 'Flyer'], max: 1 }
-                ]
-            },
-        ];
-
-
-        // ====================================================================
-        // 2. STATE MANAGEMENT
-        // ====================================================================
-
-        let armyInfo = {
-            name: "New Tyranid Army"
-        };
-        let army = []; 
-        let detachmentIdCounter = 0;
-        let selectedFormationType = null;
-        let activeSlot = null; // Stores the currently open slot { detachmentId, slotId }
-
-        // ====================================================================
-        // 3. CORE LOGIC
-        // ====================================================================
-        
-        function calculateUnitTotalPoints(unit) {
-            // Base Points + Total Upgrade Points
-            const upgradePoints = unit.upgrades ? unit.upgrades.totalPoints : 0;
-            return unit.points + upgradePoints;
-        }
-        
-        function calculateDetachmentPoints(detachment) {
-            let total = 0;
-            Object.values(detachment.slots).forEach(slot => {
-                if (slot.unit) {
-                    total += calculateUnitTotalPoints(slot.unit);
-                }
-            });
-            return total;
-        }
-
-        function calculateTotalPoints() {
-            let total = 0;
-            army.forEach(detachment => {
-                total += calculateDetachmentPoints(detachment);
-            });
-            return total;
-        }
-        
-        function getValidUnitsForSlot(slot) {
-            const slotCategories = Array.isArray(slot.category) ? slot.category : [slot.category];
-            return AVAILABLE_UNITS.filter(unit => slotCategories.includes(unit.category));
-        }
-
-        // ====================================================================
-        // 4. ACTIONS (Event Handlers) - EXPOSED TO WINDOW FOR INLINE CALLS
-        // ====================================================================
-        
-        window.updateArmyName = function(newName) {
-            armyInfo.name = newName;
-        }
-        
-        window.updateSelectedFormation = function(formationName) {
-            selectedFormationType = formationName || null;
-            const addButton = document.getElementById('add-detachment-button');
-            if (addButton) {
-                addButton.disabled = !selectedFormationType;
-            }
-        }
-
-        window.addSelectedDetachment = function() {
-            if (!selectedFormationType) return;
-            
-            detachmentIdCounter++;
-            army.push({
-                id: detachmentIdCounter,
-                name: `${selectedFormationType} Detachment ${detachmentIdCounter}`,
-                formation: selectedFormationType,
-                slots: {}
-            });
-            
-            window.updateDetachmentFormation(detachmentIdCounter, selectedFormationType, true); 
-            
-            selectedFormationType = null;
-            const selectElement = document.getElementById('new-formation-select');
-            const addButton = document.getElementById('add-detachment-button');
-            if (selectElement) {
-                selectElement.value = ''; 
-            }
-            if (addButton) {
-                addButton.disabled = true; 
-            }
-        }
-
-
-        window.removeDetachment = function(id) {
-            const detachment = army.find(d => d.id === id);
-            const confirmed = confirm(`Are you sure you want to remove the entire ${detachment.name}? This cannot be undone.`);
-            if (confirmed) {
-                 army = army.filter(d => d.id !== id);
-                 if (activeSlot && activeSlot.detachmentId === id) {
-                    window.closeUnitOptions();
-                 }
-                 renderArmy();
-            }
-        }
-        
-        window.updateDetachmentFormation = function(detachmentId, newFormationName, isInitialSetup = true) {
-            const detachment = army.find(d => d.id === detachmentId);
-            if (!detachment) return;
-
-            detachment.formation = newFormationName;
-            detachment.slots = {}; 
-
-            const formation = SWARM_FORMATIONS.find(f => f.name === newFormationName);
-            if (!formation) {
-                renderArmy();
-                return;
-            }
-
-            formation.slots.forEach(slotInfo => {
-                for (let i = 0; i < slotInfo.max; i++) {
-                    const primaryCategory = Array.isArray(slotInfo.category) ? 'Special' : slotInfo.category;
-
-                    const slotId = `${primaryCategory}_${slotInfo.type}_${i}`;
-                    const label = slotInfo.label || primaryCategory;
-                    
-                    detachment.slots[slotId] = {
-                        id: slotId,
-                        type: slotInfo.type, 
-                        label: label,
-                        category: slotInfo.category, 
-                        primaryCategory: primaryCategory, 
-                        unit: null
-                    };
-                }
-            });
-
-            renderArmy();
-        }
-
-        window.addUnitToSlot = function(detachmentId, slotId, unitName) {
-            const detachment = army.find(d => d.id === detachmentId);
-            if (!detachment) return;
-
-            const slot = detachment.slots[slotId];
-            const unitData = AVAILABLE_UNITS.find(u => u.name === unitName);
-            
-            if (slot && unitData) {
-                slot.unit = JSON.parse(JSON.stringify(unitData));
-                
-                // Initialize the upgrade state
-                slot.unit.upgrades = { 
-                    selected: {}, 
-                    totalPoints: 0 
-                }; 
-                
-                if (slot.unit.options.hasOptions) {
-                    Object.keys(slot.unit.options.data).forEach(key => {
-                        const option = slot.unit.options.data[key];
-                        
-                        if (option.type === 'dropdown') {
-                            // Default selection for dropdowns
-                            slot.unit.upgrades.selected[key] = {
-                                name: option.items[0].name,
-                                points: option.items[0].points,
-                                value: option.items[0].name
-                            };
-                        } else if (option.type === 'toggle' || option.type === 'repeater') {
-                             slot.unit.upgrades.selected[key] = {
-                                name: option.label,
-                                points: 0,
-                                value: 0
-                            };
-                        } else if (option.type === 'weaponRepeater') {
-                             // Initialize weapon repeater with the base number of models/weapons
-                             slot.unit.upgrades.selected[key] = [];
-                             // Automatically add base weapons (baseCount = 1 for Hive Guard)
-                             for (let i = 0; i < option.baseCount; i++) {
-                                 const defaultWeapon = option.items[0]; // Take the first weapon as default
-                                 slot.unit.upgrades.selected[key].push({
-                                     id: Date.now() + i, 
-                                     name: defaultWeapon.name,
-                                     points: defaultWeapon.points,
-                                     value: defaultWeapon.name
-                                 });
-                             }
-                        }
-                    });
-                    
-                    window.recalculateUnitPoints(detachmentId, slotId);
-                }
-                
-                renderArmy();
-            }
-        }
-
-        window.removeUnitFromSlot = function(detachmentId, slotId) {
-             const detachment = army.find(d => d.id === detachmentId); 
-             if (detachment && detachment.slots[slotId]) {
-                detachment.slots[slotId].unit = null;
-                if (activeSlot && activeSlot.detachmentId === detachmentId && activeSlot.slotId === slotId) {
-                    window.closeUnitOptions();
-                }
-                renderArmy();
-             }
-        }
-        
-        // --- UPGRADE PANEL LOGIC ---
-
-        window.recalculateUnitPoints = function(detachmentId, slotId) {
-            const detachment = army.find(d => d.id === detachmentId);
-            const slot = detachment.slots[slotId];
-            let newTotalPoints = 0;
-            
-            if (!slot.unit || !slot.unit.upgrades) return;
-
-            Object.keys(slot.unit.upgrades.selected).forEach(key => {
-                const selection = slot.unit.upgrades.selected[key];
-                const optionData = slot.unit.options.data[key];
-                
-                if (optionData.type === 'weaponRepeater' && Array.isArray(selection)) {
-                    // Sum up points for all individual repeater weapons
-                    selection.forEach(weapon => {
-                         newTotalPoints += weapon.points;
-                    });
-                } else if (selection.points !== undefined) {
-                    // Standard point summing
-                    newTotalPoints += selection.points;
-                }
-            });
-
-            slot.unit.upgrades.totalPoints = newTotalPoints;
-            
-            renderArmy();
-            window.renderOptionsPanel(detachmentId, slotId, false);
-        }
-
-        window.applyUpgrade = function(detachmentId, slotId, upgradeKey, value) {
-            const detachment = army.find(d => d.id === detachmentId);
-            const slot = detachment.slots[slotId];
-            const optionData = slot.unit.options.data[upgradeKey];
-            
-            if (!slot.unit || !optionData) return;
-            
-            if (optionData.type === 'repeater') {
-                 // For Brood Size or Repeater Model Additions
-                 const count = parseInt(value) || 0;
-                 slot.unit.upgrades.selected[upgradeKey].value = count;
-                 slot.unit.upgrades.selected[upgradeKey].points = count * optionData.pointsPerAdd;
-                 
-            } else if (optionData.type === 'dropdown') {
-                // For standard dropdowns
-                const selectedItem = optionData.items.find(item => item.name === value);
-                if (selectedItem) {
-                    slot.unit.upgrades.selected[upgradeKey] = {
-                        name: selectedItem.name,
-                        points: selectedItem.points,
-                        value: selectedItem.name
-                    };
-                }
-            } else if (optionData.type === 'toggle') {
-                // For toggles
-                 const isToggled = value === 'on';
-                 slot.unit.upgrades.selected[upgradeKey].points = isToggled ? optionData.points : 0;
-                 slot.unit.upgrades.selected[upgradeKey].value = isToggled;
-            }
-            
-            window.recalculateUnitPoints(detachmentId, slotId);
-        }
-        
-        // --- WEAPON REPEATER SPECIFIC LOGIC ---
-        
-        window.addRepeaterWeapon = function(detachmentId, slotId, upgradeKey, weaponName) {
-            const detachment = army.find(d => d.id === detachmentId);
-            const slot = detachment.slots[slotId];
-            const unit = slot.unit;
-            const optionData = unit.options.data[upgradeKey];
-            
-            if (!unit || !optionData || !Array.isArray(unit.upgrades.selected[upgradeKey])) return;
-
-            const currentWeapons = unit.upgrades.selected[upgradeKey];
-            
-            // Check max limit
-            if (currentWeapons.length >= optionData.maxTotal) {
-                alert(`Cannot add more than ${optionData.maxTotal} total models/weapons to this unit.`);
-                return;
-            }
-
-            const selectedItem = optionData.items.find(item => item.name === weaponName);
-            if (selectedItem) {
-                 currentWeapons.push({
-                    id: Date.now() + currentWeapons.length, // Simple unique ID
-                    name: selectedItem.name,
-                    points: selectedItem.points,
-                    value: selectedItem.name
-                 });
-                 window.recalculateUnitPoints(detachmentId, slotId);
-            }
-        }
-        
-        window.removeRepeaterWeapon = function(detachmentId, slotId, upgradeKey, weaponId) {
-            const detachment = army.find(d => d.id === detachmentId);
-            const slot = detachment.slots[slotId];
-            const unit = slot.unit;
-            const optionData = unit.options.data[upgradeKey];
-            
-            if (!unit || !optionData || !Array.isArray(unit.upgrades.selected[upgradeKey])) return;
-
-            let currentWeapons = unit.upgrades.selected[upgradeKey];
-            
-            // Prevent removing the base weapons
-            if (currentWeapons.length <= optionData.baseCount) {
-                alert(`The unit must retain at least ${optionData.baseCount} base model(s)/weapon(s).`);
-                return;
-            }
-
-            // Filter out the weapon with the matching ID
-            unit.upgrades.selected[upgradeKey] = currentWeapons.filter(w => w.id !== weaponId);
-            
-            window.recalculateUnitPoints(detachmentId, slotId);
-        }
-
-
-        window.closeUnitOptions = function() {
-             document.getElementById('unit-options-panel').classList.remove('open');
-             activeSlot = null;
-        }
-
-        window.openUnitOptions = function(detachmentId, slotId) {
-            window.closeUnitOptions(); 
-            
-            activeSlot = { detachmentId, slotId };
-            window.renderOptionsPanel(detachmentId, slotId, true);
-        }
-
-        window.renderOptionsPanel = function(detachmentId, slotId, openPanel = false) {
-            const detachment = army.find(d => d.id === detachmentId);
-            const slot = detachment.slots[slotId];
-            const unit = slot.unit;
-            const panelEl = document.getElementById('unit-options-panel');
-
-            if (!unit || !panelEl) {
-                window.closeUnitOptions();
-                return;
-            }
-
-            const totalUnitPoints = calculateUnitTotalPoints(unit);
-            const basePoints = unit.points;
-            const upgradePoints = unit.upgrades.totalPoints;
-            
-            let optionsHtml = '';
-            
-            // Loop through the unit's defined upgrade options
-            Object.keys(unit.options.data).forEach(key => {
-                const option = unit.options.data[key];
-                const selected = unit.upgrades.selected[key] || {};
-                
-                // --- Dropdown/Weapon Selector ---
-                if (option.type === 'dropdown') {
-                    const currentSelection = selected.value || (option.items.length > 0 ? option.items[0].name : '');
-                    const dropdownOptions = option.items.map(item => 
-                        `<option value="${item.name}" ${item.name === currentSelection ? 'selected' : ''}>
-                            ${item.name} (${item.points >= 0 ? '+' : ''}${item.points} pts)
-                        </option>`
-                    ).join('');
-
-                    optionsHtml += `
-                        <div class="mb-4 p-4 bg-white rounded-lg border border-gray-200">
-                            <label class="block text-sm font-medium text-gray-700 mb-2">${option.label}</label>
-                            <select onchange="window.applyUpgrade(${detachmentId}, '${slotId}', '${key}', this.value)"
-                                    class="mt-1 block w-full p-2 border border-gray-300 rounded-lg shadow-sm">
-                                ${dropdownOptions}
-                            </select>
-                        </div>
-                    `;
-                } 
-                
-                // --- Repeater/Brood Size Selector ---
-                else if (option.type === 'repeater') {
-                    const currentCount = selected.value || 0;
-                    let repeaterOptions = `<option value="0" ${currentCount === 0 ? 'selected' : ''}>Base Size</option>`;
-                    for(let i = 1; i <= option.maxAdds; i++) {
-                        const cost = i * option.pointsPerAdd;
-                        const sizeDescription = i * option.sizePerAdd;
-                        repeaterOptions += `
-                            <option value="${i}" ${currentCount === i ? 'selected' : ''}>
-                                +${sizeDescription} model(s)/base(s) (+${cost} pts)
-                            </option>
-                        `;
-                    }
-                    
-                    optionsHtml += `
-                        <div class="mb-4 p-4 bg-white rounded-lg border border-gray-200">
-                            <label class="block text-sm font-bold text-gray-700 mb-2">Brood Size Selection</label>
-                            <select onchange="window.applyUpgrade(${detachmentId}, '${slotId}', '${key}', this.value)"
-                                    class="mt-1 block w-full p-2 border border-gray-300 rounded-lg shadow-sm">
-                                ${repeaterOptions}
-                            </select>
-                            <p class="text-xs text-gray-500 mt-1">Base size: 1 model/base (assuming). Max additions: ${option.maxAdds}.</p>
-                        </div>
-                    `;
-                }
-                
-                // --- Toggle/Single Model Upgrade ---
-                else if (option.type === 'toggle') {
-                     const isChecked = selected.value === true;
-                     optionsHtml += `
-                        <div class="mb-4 p-4 bg-white rounded-lg border border-gray-200 flex justify-between items-center">
-                            <label for="${key}_toggle" class="text-sm font-medium text-gray-700">${option.label} (+${option.points} pts)</label>
-                            <input type="checkbox" id="${key}_toggle" 
-                                onclick="window.applyUpgrade(${detachmentId}, '${slotId}', '${key}', this.checked ? 'on' : 'off')"
-                                ${isChecked ? 'checked' : ''}
-                                class="h-5 w-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                        </div>
-                    `;
-                }
-                
-                // --- NEW: Weapon Repeater (for multi-model units) ---
-                else if (option.type === 'weaponRepeater') {
-                    const weaponsArray = selected; // Array of selected weapons
-                    const currentCount = weaponsArray.length;
-                    const remainingSlots = option.maxTotal - currentCount;
-                    
-                    const weaponOptions = option.items.map(item => 
-                        `<option value="${item.name}">${item.name} (+${item.points} pts)</option>`
-                    ).join('');
-
-                    const weaponsList = weaponsArray.map(weapon => `
-                        <li class="flex justify-between items-center py-2 border-b last:border-b-0">
-                            <span class="text-sm text-gray-700">${weapon.name}</span>
-                            <div class="flex items-center space-x-2">
-                                <span class="text-sm font-semibold text-indigo-700">${weapon.points} pts</span>
-                                <button 
-                                    onclick="window.removeRepeaterWeapon(${detachmentId}, '${slotId}', '${key}', ${weapon.id})"
-                                    class="text-red-500 hover:text-red-700 p-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    ${currentCount <= option.baseCount ? 'disabled' : ''}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clip-rule="evenodd" />
-                                    </svg>
-                                </button>
-                            </div>
-                        </li>
-                    `).join('');
-
-                    optionsHtml += `
-                        <div class="mb-6 p-4 bg-white rounded-lg border border-gray-300 shadow-lg">
-                            <h5 class="text-md font-extrabold text-indigo-800 mb-3 border-b pb-2">Unit Models/Weapons (${currentCount}/${option.maxTotal})</h5>
-                            
-                            <ul class="mb-4 bg-gray-50 p-3 rounded-lg">
-                                ${weaponsList || '<li class="text-gray-500 text-sm">No weapons selected.</li>'}
-                            </ul>
-                            
-                            <div class="mt-4 ${remainingSlots <= 0 ? 'opacity-50 pointer-events-none' : ''}">
-                                <label class="block text-xs font-semibold text-gray-600 mb-2">ADD NEW WEAPON (Slots Remaining: ${remainingSlots})</label>
-                                <div class="flex space-x-2">
-                                    <select id="repeater-select-${key}"
-                                            class="flex-grow p-2 border border-gray-300 rounded-lg shadow-sm text-sm">
-                                        ${weaponOptions}
-                                    </select>
-                                    <button 
-                                        onclick="window.addRepeaterWeapon(${detachmentId}, '${slotId}', '${key}', document.getElementById('repeater-select-${key}').value)"
-                                        class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-3 rounded-lg text-sm transition duration-150">
-                                        + Add
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }
-            });
-
-
-            // Final Panel HTML Structure
-            panelEl.innerHTML = `
-                <div class="p-6 h-full flex flex-col">
-                    <div class="border-b pb-4 mb-4 flex justify-between items-center">
-                        <div>
-                            <h3 class="text-2xl font-extrabold text-indigo-800">${unit.name}</h3>
-                            <p class="text-sm text-gray-500">${slot.label.toUpperCase()} SLOT</p>
-                        </div>
-                        <button onclick="window.closeUnitOptions()" class="text-gray-400 hover:text-gray-700 p-2">
-                             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                             </svg>
-                        </button>
-                    </div>
-
-                    <div class="bg-indigo-100 p-3 rounded-lg mb-6 shadow-inner">
-                        <div class="text-lg font-bold text-indigo-800 flex justify-between">
-                            <span>BASE POINTS:</span> <span>${basePoints} pts</span>
-                        </div>
-                        <div class="text-lg font-bold text-red-700 flex justify-between">
-                            <span>UPGRADE POINTS:</span> <span>${upgradePoints} pts</span>
-                        </div>
-                        <div class="border-t mt-2 pt-2 text-xl font-extrabold text-indigo-900 flex justify-between">
-                            <span>TOTAL UNIT POINTS:</span> <span>${totalUnitPoints} pts</span>
-                        </div>
-                    </div>
-                    
-                    <div class="flex-grow custom-scrollbar space-y-4 overflow-y-auto pr-2">
-                         <h4 class="text-lg font-bold text-gray-700 border-b pb-2 mb-2">Configure Unit Options</h4>
-                         ${optionsHtml || '<p class="text-gray-500">No options available for this unit.</p>'}
-                    </div>
-                </div>
-            `;
-            
-            if (openPanel) {
-                panelEl.classList.add('open');
-            }
-        }
-        
-        function renderArmyHeader() {
-            const totalPointsEl = document.getElementById('total-points');
-            const detachmentCountEl = document.getElementById('detachment-count');
-            
-            if (totalPointsEl) {
-                totalPointsEl.textContent = calculateTotalPoints();
-            }
-            if (detachmentCountEl) {
-                detachmentCountEl.textContent = army.length;
-            }
-        }
-
-        // Main render function: re-draws everything
-        function renderArmy() {
-            const armyContainer = document.getElementById('detachment-area');
-            const emptyMessage = document.getElementById('empty-army-message');
-
-            if (!armyContainer) {
-                console.error("CRITICAL ERROR: Detachment area container (#detachment-area) not found.");
-                return; 
-            }
-
-            if (army.length === 0) {
-                if (emptyMessage) {
-                    emptyMessage.style.display = 'block';
-                } else {
-                    armyContainer.innerHTML = '<div class="text-gray-500 text-center py-8 bg-white rounded-lg shadow-md" id="empty-army-message">Select a formation type and click "Add New Detachment" to begin building your army.</div>';
-                }
-            } else {
-                if (emptyMessage) {
-                    emptyMessage.style.display = 'none';
-                }
-
-                try {
-                    armyContainer.innerHTML = army.map(renderDetachment).join('');
-                } catch (e) {
-                    console.error("CRITICAL ERROR DURING RENDERING:", e);
-                }
-            }
-            
-            renderArmyHeader();
-            
-            if (activeSlot) {
-                window.renderOptionsPanel(activeSlot.detachmentId, activeSlot.slotId, true);
-            }
-        }
-
-        function renderFormationSelector() {
-            const selectEl = document.getElementById('new-formation-select');
-            if (!selectEl) return;
-
-            let optionsHtml = '<option value="" disabled selected>-- Select a Formation --</option>';
-
-            SWARM_FORMATIONS.forEach(formation => {
-                optionsHtml += `<option value="${formation.name}">${formation.name}</option>`;
-            });
-
-            selectEl.innerHTML = optionsHtml;
-        }
-
-        function renderValidationBadge(detachment) {
-            // Placeholder/simplified validation
-            const getDetachmentAlerts = (d) => {
-                const alerts = [];
-                Object.values(d.slots).forEach(slot => {
-                    if (slot.type === 'Mandatory' && !slot.unit) {
-                        alerts.push({ type: 'Mandatory', message: `Compulsory unit missing: ${slot.label}` });
-                    }
-                });
-                return alerts;
-            };
-
-            const alerts = getDetachmentAlerts(detachment);
-            if (alerts.length > 0) {
-                const message = alerts.map(a => a.message).join(' | ');
-                 return `
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800"
-                          title="${message}">
-                        ⚠️ Validation Error
-                    </span>
-                 `;
-            } else if (Object.keys(detachment.slots).length > 0) {
-                return `
-                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        ✅ Valid
-                    </span>
-                `;
-            }
-            return '';
-        }
-
-        // --- RENDERING HELPERS (renderSlot, renderSlotGroup, renderDetachment) remain the same ---
-
-        function renderSlot(detachmentId, slot) {
-            const icon = UNIT_ICONS[slot.primaryCategory] || UNIT_ICONS.Special;
-            const validUnits = getValidUnitsForSlot(slot);
-            const options = validUnits.map(unit =>
-                `<option value="${unit.name}">${unit.name} (${unit.points} pts)</option>`
-            ).join('');
-
-            const borderColor = slot.type === 'Mandatory' ? 'border-red-500' : 'border-gray-300';
-            const bgColor = slot.type === 'Mandatory' ? 'bg-red-50' : 'bg-white';
-            const textColor = slot.type === 'Mandatory' ? 'text-red-800' : 'text-gray-800';
-
-            if (slot.unit) {
-                const unitTotalPoints = calculateUnitTotalPoints(slot.unit);
-                
-                return `
-                    <div class="flex items-center p-3 border-2 ${borderColor} ${bgColor} rounded-lg shadow-sm">
-                        <span class="text-3xl mr-4">${icon}</span>
-                        <div class="flex-grow">
-                            <div class="text-xs font-medium text-gray-500">${slot.label.toUpperCase()}</div>
-                            <div class="text-md font-semibold ${textColor}">${slot.unit.name}</div>
-                        </div>
-                        
-                        <div class="flex items-center">
-                            <div class="text-md font-bold text-indigo-700 mr-4 whitespace-nowrap">${unitTotalPoints} pts</div>
-                            
-                            ${slot.unit.options && slot.unit.options.hasOptions ? `
-                                <button 
-                                    onclick="window.openUnitOptions(${detachmentId}, '${slot.id}')"
-                                    class="text-indigo-600 hover:text-indigo-800 font-bold transition duration-150 p-1 mr-2 rounded-full hover:bg-indigo-100"
-                                    title="Manage Unit Upgrades">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37z" />
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                    </svg>
-                                </button>
-                            ` : ''}
-
-                            <button 
-                                onclick="window.removeUnitFromSlot(${detachmentId}, '${slot.id}')"
-                                class="text-gray-400 hover:text-red-500 font-bold transition duration-150 p-1 rounded-full hover:bg-red-100"
-                                title="Remove Unit">
-                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-                                 </svg>
-                            </button>
-                        </div>
-                    </div>
-                `;
-            } else {
-                return `
-                    <div class="flex items-center p-3 border ${borderColor} ${bgColor} rounded-lg shadow-inner">
-                        <span class="text-3xl mr-4 text-gray-400">${icon}</span>
-                        <div class="flex-grow">
-                            <span class="block text-xs font-semibold text-gray-500">${slot.label.toUpperCase()} SLOT</span>
-                            <select onchange="window.addUnitToSlot(${detachmentId}, '${slot.id}', this.value)"
-                                    class="mt-1 block w-full p-1 border-gray-300 rounded-md bg-white text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                                <option value="" disabled selected>+ Select Unit (${slot.label})</option>
-                                ${options}
-                            </select>
-                        </div>
-                    </div>
-                `;
-            }
-        }
-        
-        function renderSlotGroup(detachmentId, group) {
-            const slotsInGroup = group.slots;
-            const count = slotsInGroup.filter(s => s.unit).length;
-            const max = slotsInGroup.length;
-            
-            const headerText = `${group.label.toUpperCase()} SLOTS (${count}/${max})`;
-
-            return `
-                <div class="mb-4">
-                    <h4 class="text-base font-bold text-gray-700 mb-3">${headerText}</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        ${slotsInGroup.map(slot => renderSlot(detachmentId, slot)).join('')}
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderDetachment(detachment) {
-            const points = calculateDetachmentPoints(detachment);
-            const groupedSlots = { Mandatory: {}, Optional: {} };
-            
-            Object.values(detachment.slots).forEach(slot => {
-                const groupKey = slot.label;
-                if (!groupedSlots[slot.type][groupKey]) {
-                    groupedSlots[slot.type][groupKey] = {
-                        type: slot.type,
-                        label: slot.label,
-                        category: slot.primaryCategory,
-                        slots: []
-                    };
-                }
-                groupedSlots[slot.type][groupKey].slots.push(slot);
-            });
-            
-            const sortGroups = (groups) => {
-                return Object.keys(groups).sort((a, b) => {
-                    const groupA = groups[a];
-                    const groupB = groups[b];
-                    const orderA = CATEGORY_SORT_ORDER[groupA.category] || 99;
-                    const orderB = CATEGORY_SORT_ORDER[groupB.category] || 99;
-                    return orderA - orderB;
-                });
-            };
-
-            const sortedMandatoryKeys = sortGroups(groupedSlots.Mandatory);
-            const mandatorySlotsHtml = sortedMandatoryKeys.map(key => 
-                renderSlotGroup(detachment.id, groupedSlots.Mandatory[key])
-            ).join('');
-
-            const sortedOptionalKeys = sortGroups(groupedSlots.Optional);
-            const optionalSlotsHtml = sortedOptionalKeys.map(key => 
-                renderSlotGroup(detachment.id, groupedSlots.Optional[key])
-            ).join('');
-
-            
-            const mandatorySection = mandatorySlotsHtml ? `
-                <div class="border-b-4 border-red-300 pb-4 mb-6">
-                    <h3 class="text-xl font-extrabold text-red-700 uppercase mb-4">MANDATORY UNIT SLOTS</h3>
-                    ${mandatorySlotsHtml}
-                </div>
-            ` : '';
-
-            const optionalSection = optionalSlotsHtml ? `
-                <div class="pb-4">
-                    <h3 class="text-xl font-extrabold text-gray-700 uppercase mb-4">OPTIONAL UNIT SLOTS</h3>
-                    ${optionalSlotsHtml}
-                </div>
-            ` : '';
-            
-            const slotsHtml = mandatorySection + optionalSection;
-            const hasFormation = !!detachment.formation;
-
-
-            return `
-                <div class="bg-white shadow-xl rounded-lg overflow-hidden">
-                    <div class="p-5 bg-indigo-50 flex flex-col md:flex-row justify-between md:items-start gap-4 border-b-4 border-indigo-200">
-                        <div class="flex flex-col space-y-2">
-                             <div class="flex items-center space-x-3">
-                                <h3 class="text-2xl font-extrabold text-indigo-800">${detachment.name}</h3>
-                                ${renderValidationBadge(detachment)}
-                            </div>
-                            <div class="text-lg font-bold text-indigo-900 bg-indigo-100 px-3 py-1 rounded-full w-fit shadow-inner">
-                                ${points} pts</div>
-                        </div>
-                        
-                        <div class="flex items-center space-x-4 mt-2 md:mt-0">
-                            ${hasFormation ? `
-                                 <span class="text-sm font-semibold text-indigo-700 bg-indigo-100 px-3 py-1 rounded-lg shadow-sm">Formation: ${detachment.formation}</span>
-                            ` : `<span class="text-sm text-gray-500 font-medium">No Formation.</span>`}
-
-                             <button onclick="window.removeDetachment(${detachment.id})" class="text-red-500 hover:text-red-700 font-semibold text-sm p-2 rounded-full hover:bg-red-100 transition duration-150" title="Remove Detachment">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="p-6">
-                        ${detachment.formation ? slotsHtml : '<div class="text-gray-500 text-center p-8 bg-gray-50 rounded-lg">Select a formation type and click "Add New Detachment" to begin.</div>'}
-                    </div>
-                </div>
-            `;
-        }
-
-
-        // Initialize the app immediately
-        renderArmy();
-        renderFormationSelector();
-
-    </script>
-</body>
-</html>
+export default App;
