@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tyranid Army Builder (V12 - Final)</title>
+    <title>Tyranid Army Builder (V13 - Final)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom scrollbar for a cleaner look */
@@ -156,14 +156,14 @@
         }
 
         // ====================================================================
-        // 4. ACTIONS (Event Handlers)
+        // 4. ACTIONS (Event Handlers) - EXPOSED TO WINDOW FOR ONCLICK ATTRIBUTES
         // ====================================================================
         
-        function updateArmyName(newName) {
+        window.updateArmyName = function(newName) {
             armyInfo.name = newName;
         }
 
-        function addDetachment() {
+        window.addDetachment = function() {
             detachmentIdCounter++;
             army.push({
                 id: detachmentIdCounter,
@@ -174,12 +174,12 @@
             renderArmy();
         }
 
-        function removeDetachment(id) {
+        window.removeDetachment = function(id) {
             army = army.filter(d => d.id !== id);
             renderArmy();
         }
         
-        function updateDetachmentFormation(detachmentId, newFormationName) {
+        window.updateDetachmentFormation = function(detachmentId, newFormationName) {
             const detachment = army.find(d => d.id === detachmentId);
             if (!detachment) return;
 
@@ -210,7 +210,7 @@
             renderArmy();
         }
 
-        function addUnitToSlot(detachmentId, slotId, unitName) {
+        window.addUnitToSlot = function(detachmentId, slotId, unitName) {
             const detachment = army.find(d => d.id === detachmentId);
             if (!detachment) return;
 
@@ -223,7 +223,7 @@
             }
         }
 
-        function removeUnitFromSlot(detachmentId, slotId) {
+        window.removeUnitFromSlot = function(detachmentId, slotId) {
              const detachment = army.find(d => d.id === detachmentId);
              if (detachment && detachment.slots[slotId]) {
                 detachment.slots[slotId].unit = null;
@@ -366,7 +366,7 @@
         // Main render function: re-draws everything
         function renderArmy() {
             const armyContainer = document.getElementById('detachment-area');
-            const emptyMessage = document.getElementById('empty-army-message'); // This element is destroyed on the first render!
+            const emptyMessage = document.getElementById('empty-army-message');
 
             // Safety check for the main container
             if (!armyContainer) {
@@ -377,16 +377,17 @@
             if (army.length === 0) {
                 // If army is empty, make sure the empty message is visible.
                 if (emptyMessage) {
-                    armyContainer.innerHTML = '';
+                    // Do not clear armyContainer.innerHTML here if army.length is 0, as the empty message is already present.
                     emptyMessage.style.display = 'block';
                 } else {
-                    // If emptyMessage was destroyed, re-insert the message to prompt the user
+                    // If emptyMessage was destroyed (e.g., if army was deleted down to 0), re-insert the message.
                     armyContainer.innerHTML = '<div class="text-gray-500 text-center py-8 bg-white rounded-lg shadow-md" id="empty-army-message">Click "Add New Detachment" to begin building your army.</div>';
                 }
             } else {
-                // This is the key fix: use Optional Chaining to prevent the crash
-                // when emptyMessage is null (which it will be after the first render).
-                emptyMessage?.style.display = 'none';
+                // Hide the empty message using a safe IF block (fixes the SyntaxError)
+                if (emptyMessage) {
+                    emptyMessage.style.display = 'none';
+                }
 
                 try {
                     armyContainer.innerHTML = army.map(renderDetachment).join('');
