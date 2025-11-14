@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tyranid Army Builder (V5 - Slots)</title>
+    <title>Tyranid Army Builder (V10 - Diagnostic)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom scrollbar for a cleaner look */
@@ -24,13 +24,13 @@
     <div id="app" class="max-w-7xl mx-auto">
         
         <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
-            <h1 class="text-3xl font-bold text-gray-800 mb-4">Roster Info</h1>
+            <h1 class="text-3xl font-bold text-gray-800 mb-4">Army Info</h1>
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                 <div class="md:col-span-2">
-                    <label for="roster-name" class="block text-sm font-medium text-gray-700">Roster Name</label>
-                    <input type="text" id="roster-name" onchange="updateRosterName(this.value)"
+                    <label for="army-name" class="block text-sm font-medium text-gray-700">Army Name</label>
+                    <input type="text" id="army-name" onchange="updateArmyName(this.value)"
                            class="mt-1 block w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                           value="New Tyranid Roster">
+                           value="New Tyranid Army">
                 </div>
                 <div>
                     <div class="text-sm font-medium text-gray-700">Total Points</div>
@@ -48,8 +48,8 @@
             </div>
         </div>
 
-        <div id="detachment-roster" class="space-y-6">
-            <div class="text-gray-500 text-center py-8 bg-white rounded-lg shadow-md" id="empty-roster-message">
+        <div id="detachment-area" class="space-y-6">
+            <div class="text-gray-500 text-center py-8 bg-white rounded-lg shadow-md" id="empty-army-message">
                 Click "Add New Detachment" to begin building your army.
             </div>
         </div>
@@ -57,11 +57,339 @@
 
     <script>
         // ====================================================================
-        // 1. DATA (Editable)
+        // 1. DATA
         // ====================================================================
 
-        // --- Available Units (Using categories from the Swarm Formation Table) ---
         const AVAILABLE_UNITS = [
             // Synapse
             { name: "Hive Tyrant", category: "Synapse", points: 200, rules: [] },
             { name: "Neurotyrant", category: "Synapse", points: 190, rules: [] },
+            
+            // Core
+            { name: "Termagants", category: "Core", points: 60, rules: [] },
+            { name: "Hormagaunts", category: "Core", points: 70, rules: [] },
+            { name: "Tyranid Warriors", category: "Core", points: 100, rules: [] },
+            
+            // Transport
+            { name: "Tyrant Guard", category: "Transport", points: 150, rules: [] },
+            
+            // Biotitan
+            { name: "Hierophant", category: "Biotitan", points: 800, rules: [] },
+            { name: "Harridan", category: "Biotitan", points: 750, rules: [] },
+            
+            // Flyer
+            { name: "Mawloc", category: "Flyer", points: 170, rules: [] },
+            { name: "Harpy", category: "Flyer", points: 190, rules: [] },
+        ];
+        
+        const SWARM_FORMATIONS = [
+            {
+                name: "Assault Swarm",
+                slots: [
+                    { type: 'Mandatory', category: 'Synapse', max: 1 },
+                    { type: 'Mandatory', category: 'Core', max: 3 },
+                    { type: 'Mandatory', category: 'Transport', max: 1 },
+                    { type: 'Optional', category: 'Synapse', max: 2 },
+                    { type: 'Optional', category: 'Core', max: 6 },
+                    { type: 'Optional', category: 'Flyer', max: 2 }
+                ]
+            },
+            {
+                name: "Bio-Titan Swarm",
+                slots: [
+                    { type: 'Mandatory', category: 'Biotitan', max: 3 },
+                    { type: 'Optional', category: 'Biotitan', max: 3 }
+                ]
+            },
+            {
+                name: "Synaptic Swarm",
+                slots: [
+                    { type: 'Mandatory', category: 'Synapse', max: 1 },
+                    { type: 'Mandatory', category: 'Core', max: 3 },
+                    { type: 'Optional', category: 'Synapse', max: 2 },
+                    { type: 'Optional', category: 'Core', max: 6 },
+                    { type: 'Special', label: 'Biotitan or Flyer', category: ['Biotitan', 'Flyer'], max: 1 }
+                ]
+            },
+        ];
+
+
+        // ====================================================================
+        // 2. STATE MANAGEMENT
+        // ====================================================================
+
+        let armyInfo = {
+            name: "New Tyranid Army"
+        };
+        let army = []; // This holds all detachment objects
+        let detachmentIdCounter = 0;
+
+        // ====================================================================
+        // 3. CORE LOGIC
+        // ====================================================================
+
+        function calculateTotalPoints() {
+            let total = 0;
+            army.forEach(detachment => {
+                Object.values(detachment.slots).forEach(slot => {
+                    if (slot.unit) {
+                        total += slot.unit.points;
+                    }
+                });
+            });
+            return total;
+        }
+
+        function getDetachmentAlerts(detachment) {
+            const alerts = [];
+            Object.values(detachment.slots).forEach(slot => {
+                if (slot.type === 'Mandatory' && !slot.unit) {
+                    alerts.push({ type: 'Mandatory', message: `ERROR: ${slot.label} slot is empty.` });
+                }
+            });
+            return alerts;
+        }
+
+        function getValidUnitsForSlot(slot) {
+            const slotCategories = Array.isArray(slot.category) ? slot.category : [slot.category];
+            return AVAILABLE_UNITS.filter(unit => slotCategories.includes(unit.category));
+        }
+
+        // ====================================================================
+        // 4. ACTIONS (Event Handlers)
+        // ====================================================================
+        
+        function updateArmyName(newName) {
+            armyInfo.name = newName;
+        }
+
+        function addDetachment() {
+            console.log("DIAGNOSTIC: addDetachment() function called.");
+            detachmentIdCounter++;
+            army.push({
+                id: detachmentIdCounter,
+                name: `Detachment ${detachmentIdCounter}`,
+                formation: null,
+                slots: {}
+            });
+            console.log("DIAGNOSTIC: Army object updated. Calling renderArmy().");
+            renderArmy();
+        }
+
+        function removeDetachment(id) {
+            army = army.filter(d => d.id !== id);
+            renderArmy();
+        }
+        
+        function updateDetachmentFormation(detachmentId, newFormationName) {
+            const detachment = army.find(d => d.id === detachmentId);
+            if (!detachment) return;
+
+            detachment.formation = newFormationName;
+            detachment.slots = {}; 
+
+            const formation = SWARM_FORMATIONS.find(f => f.name === newFormationName);
+            if (!formation) {
+                renderArmy();
+                return;
+            }
+
+            formation.slots.forEach(slotInfo => {
+                for (let i = 0; i < slotInfo.max; i++) {
+                    const slotId = `${slotInfo.type}_${slotInfo.category}_${i}`;
+                    const label = slotInfo.label || `${slotInfo.type}: ${slotInfo.category}`;
+                    
+                    detachment.slots[slotId] = {
+                        id: slotId,
+                        type: slotInfo.type, 
+                        label: label,
+                        category: slotInfo.category,
+                        unit: null
+                    };
+                }
+            });
+
+            renderArmy();
+        }
+
+        function addUnitToSlot(detachmentId, slotId, unitName) {
+            const detachment = army.find(d => d.id === detachmentId);
+            if (!detachment) return;
+
+            const slot = detachment.slots[slotId];
+            const unitData = AVAILABLE_UNITS.find(u => u.name === unitName);
+            
+            if (slot && unitData) {
+                slot.unit = { ...unitData };
+                renderArmy();
+            }
+        }
+
+        function removeUnitFromSlot(detachmentId, slotId) {
+             const detachment = army.find(d => d.id === detachmentId);
+             if (detachment && detachment.slots[slotId]) {
+                detachment.slots[slotId].unit = null;
+                renderArmy();
+             }
+        }
+
+
+        // ====================================================================
+        // 5. RENDERING (UI Update)
+        // ====================================================================
+        
+        function renderArmyHeader() {
+            document.getElementById('total-points').textContent = calculateTotalPoints();
+            document.getElementById('detachment-count').textContent = army.length;
+        }
+        
+        function renderSlot(detachmentId, slot) {
+            if (slot.unit) {
+                // --- RENDER A FILLED SLOT ---
+                return `
+                    <div class="flex justify-between items-center p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <div class="flex-grow">
+                            <div class="text-xs font-medium text-gray-500">${slot.label}</div>
+                            <div class="text-md font-semibold text-gray-900">${slot.unit.name}</div>
+                        </div>
+                        <div class="text-md font-semibold text-indigo-700 mr-4">${slot.unit.points} pts</div>
+                        <button 
+                            onclick="removeUnitFromSlot(${detachmentId}, '${slot.id}')"
+                            class="text-red-500 hover:text-red-700 font-bold text-xl"
+                            title="Remove Unit">
+                            &times;
+                        </button>
+                    </div>
+                `;
+            } else {
+                // --- RENDER AN EMPTY SLOT ---
+                const validUnits = getValidUnitsForSlot(slot);
+                const options = validUnits.map(unit =>
+                    `<option value="${unit.name}">${unit.name} (${unit.points} pts)</option>`
+                ).join('');
+
+                const selectColor = slot.type === 'Mandatory' ? 'border-red-400' : 'border-gray-300';
+                const labelColor = slot.type === 'Mandatory' ? 'text-red-600' : 'text-gray-700';
+
+                return `
+                    <div class="flex items-center p-3 bg-white border ${selectColor} rounded-lg">
+                        <span class="flex-grow text-sm font-semibold ${labelColor}">${slot.label}</span>
+                        <select onchange="addUnitToSlot(${detachmentId}, '${slot.id}', this.value)"
+                                class="p-2 border border-gray-300 rounded-lg bg-white text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                            <option value="" disabled selected>+ Select Unit</option>
+                            ${options}
+                        </select>
+                    </div>
+                `;
+            }
+        }
+        
+        function renderAlerts(detachment) {
+            const alerts = getDetachmentAlerts(detachment);
+            if (alerts.length === 0) {
+                 return '<div class="text-xs text-green-600 font-medium p-2">Validation OK: All mandatory slots filled.</div>';
+            }
+            return alerts.map(alert => `
+                <div class="flex items-center p-2 text-xs rounded-lg border-l-4 bg-red-100 text-red-700 border-red-400">
+                    <span class="font-bold mr-2">MANDATORY:</span>
+                    ${alert.message}
+                </div>
+            `).join('');
+        }
+
+        function renderDetachment(detachment) {
+            const formationOptions = SWARM_FORMATIONS.map(f => `
+                <option value="${f.name}" ${f.name === detachment.formation ? 'selected' : ''}>
+                    ${f.name}
+                </option>
+            `).join('');
+
+            const slotGroups = {};
+            Object.values(detachment.slots).forEach(slot => {
+                if (!slotGroups[slot.label]) {
+                    slotGroups[slot.label] = [];
+                }
+                slotGroups[slot.label].push(slot);
+            });
+            
+            const slotsHtml = Object.keys(slotGroups).sort().map(label => {
+                const slotsInGroup = slotGroups[label];
+                const type = slotsInGroup[0].type;
+                const count = slotsInGroup.filter(s => s.unit).length;
+                const max = slotsInGroup.length;
+                const color = type === 'Mandatory' ? 'text-red-700' : 'text-gray-700';
+
+                return `
+                    <div class="mb-4">
+                        <h4 class="text-lg font-semibold ${color} mb-2">${label} (${count} / ${max})</h4>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                            ${slotsInGroup.map(slot => renderSlot(detachment.id, slot)).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+
+            return `
+                <div class="bg-white shadow-lg rounded-lg overflow-hidden">
+                    <div class="p-4 bg-indigo-50 flex flex-col md:flex-row justify-between md:items-center gap-4 border-b border-indigo-200">
+                        <h3 class="text-2xl font-bold text-indigo-800">${detachment.name}</h3>
+                        <div class="flex items-center space-x-4">
+                            <label for="formation-select-${detachment.id}" class="text-sm font-medium text-gray-700">Formation:</label>
+                            <select id="formation-select-${detachment.id}" 
+                                    onchange="updateDetachmentFormation(${detachment.id}, this.value)"
+                                    class="p-2 border border-gray-300 rounded-lg bg-white text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="" disabled ${!detachment.formation ? 'selected' : ''}>-- Select a Formation --</option>
+                                ${formationOptions}
+                            </select>
+                        </div>
+                        <button onclick="removeDetachment(${detachment.id})" class="text-red-500 hover:text-red-700 font-semibold text-sm">
+                            [Remove Detachment]
+                        </button>
+                    </div>
+                    
+                    <div class="p-6">
+                        ${detachment.formation ? slotsHtml : '<div class="text-gray-500 text-center p-4">Please select a formation to see its slots.</div>'}
+                    </div>
+
+                    <div class="p-4 bg-gray-50 border-t">
+                        <h5 class="font-semibold text-gray-700 mb-2">Rules & Mandatory Alerts</h5>
+                        <div class="space-y-2">
+                            ${renderAlerts(detachment)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Main render function: re-draws everything
+        function renderArmy() {
+            console.log("DIAGNOSTIC: renderArmy() started.");
+            const armyContainer = document.getElementById('detachment-area');
+            const emptyMessage = document.getElementById('empty-army-message');
+
+            if (army.length === 0) {
+                armyContainer.innerHTML = '';
+                emptyMessage.style.display = 'block';
+            } else {
+                emptyMessage.style.display = 'none';
+                try {
+                    armyContainer.innerHTML = army.map(renderDetachment).join('');
+                    console.log("DIAGNOSTIC: HTML successfully generated and inserted into DOM.");
+                } catch (e) {
+                    console.error("CRITICAL ERROR DURING RENDERING:", e);
+                }
+            }
+            
+            renderArmyHeader();
+            console.log("DIAGNOSTIC: renderArmy() finished.");
+        }
+
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', () => {
+             renderArmy(); 
+        });
+
+    </script>
+</body>
+</html>
