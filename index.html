@@ -26,21 +26,26 @@
         <!-- Main Builder Layout -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            <!-- Left Column: Detachment, Summary, and Constraints -->
+            <!-- Left Column: Detachment Adder, Summary, and Constraints -->
             <div class="lg:col-span-1 space-y-8">
-                <!-- Points and Detachment Card -->
+                <!-- Points and Detachment Adder Card -->
                 <div class="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700">
                     <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-2xl font-bold text-gray-200">Roster Summary</h2>
+                        <h2 class="text-2xl font-bold text-gray-200">Total Points</h2>
                         <span id="points-display" class="text-4xl font-extrabold text-red-500">0</span>
                     </div>
                     <div class="border-t border-gray-700 pt-4">
-                        <label for="detachment-select" class="block text-sm font-medium text-gray-400 mb-2">Select Swarm Formation</label>
-                        <select id="detachment-select" class="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 focus:ring-teal-500 focus:border-teal-500 transition duration-150">
-                            <!-- Options populated by JS -->
-                        </select>
-                        <div id="detachment-rules" class="mt-3 p-3 bg-gray-700 rounded-lg text-sm text-gray-300 transition duration-300">
-                            Select a Formation to see its rules and requirements.
+                        <label for="new-detachment-select" class="block text-sm font-medium text-gray-400 mb-2">Add New Swarm Formation</label>
+                        <div class="flex space-x-2">
+                            <select id="new-detachment-select" class="flex-grow p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 focus:ring-teal-500 focus:border-teal-500 transition duration-150">
+                                <!-- Options populated by JS -->
+                            </select>
+                            <button onclick="handleAddDetachment()" class="p-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition duration-150 font-semibold">
+                                Add
+                            </button>
+                        </div>
+                        <div id="selected-detachment-rules" class="mt-3 p-3 bg-gray-700 rounded-lg text-sm text-gray-300 transition duration-300">
+                            Select a Formation to see its rules and requirements before adding it to the Roster.
                         </div>
                     </div>
                 </div>
@@ -49,30 +54,38 @@
                 <div class="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700">
                     <h2 class="text-xl font-bold text-gray-200 mb-3 flex items-center">
                         <span class="text-teal-400 text-xl mr-2">🛡️</span>
-                        Constraint Validation
+                        Constraint Validation (Per Detachment)
                     </h2>
                     <div id="constraint-list" class="space-y-2 custom-scrollbar max-h-60 overflow-y-auto">
                         <!-- Constraints populated by JS -->
-                        <p class="text-gray-400 text-sm">Constraints will appear here once a Swarm Formation is selected.</p>
+                        <p class="text-gray-400 text-sm">Add a Swarm Formation to check compliance.</p>
                     </div>
                 </div>
 
             </div>
 
-            <!-- Right Column: Unit Pool and Roster List -->
+            <!-- Right Column: Roster List and Unit Pool -->
             <div class="lg:col-span-2 space-y-8">
                 <!-- Roster List -->
                 <div class="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700">
                     <h2 class="text-2xl font-bold text-gray-200 mb-4">Your Roster <span id="unit-count" class="text-gray-500 text-lg">(0 Broods)</span></h2>
-                    <div id="roster-list" class="space-y-3 custom-scrollbar max-h-96 overflow-y-auto">
-                        <p id="empty-roster-message" class="text-gray-500 italic text-center py-4">Your hive fleet needs more biomass. Add units from below!</p>
-                        <!-- Roster items populated by JS -->
+                    <div id="roster-list" class="space-y-6 custom-scrollbar max-h-96 overflow-y-auto">
+                        <p id="empty-roster-message" class="text-gray-500 italic text-center py-4">Add your first Swarm Formation to begin building your army.</p>
+                        <!-- Detachment containers and units populated by JS -->
                     </div>
                 </div>
 
                 <!-- Unit Pool -->
                 <div class="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700">
                     <h2 class="text-2xl font-bold text-gray-200 mb-4">Available Broods (Unit Pool)</h2>
+                    <!-- NEW: Target Detachment Selector -->
+                    <div class="mb-4">
+                        <label for="target-detachment-select" class="block text-sm font-medium text-gray-400 mb-2">Target Detachment for New Units</label>
+                        <select id="target-detachment-select" onchange="state.activeDetachmentId = parseInt(this.value)" class="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 focus:ring-teal-500 focus:border-teal-500 transition duration-150" disabled>
+                            <option value="" disabled selected>Add a Formation first</option>
+                        </select>
+                    </div>
+                    <!-- END NEW -->
                     <div id="unit-pool" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <!-- Unit cards populated by JS -->
                     </div>
@@ -260,8 +273,10 @@
                     {
                         id: 'synapse-ratio',
                         check: (roster) => {
+                            // roster is now an array of units for a single detachment
                             const coreCount = roster.filter(item => UNITS[item.name].type === 'Core Brood').length;
                             const synapseCount = roster.filter(item => UNITS[item.name].type === 'Synapse Creature Brood').length;
+                            // Flyers/Bio-Titans don't count toward the limit, so we only need Core Brood count.
                             const requiredSynapse = Math.ceil(coreCount / 3);
                             
                             if (synapseCount < requiredSynapse) {
@@ -289,13 +304,15 @@
                         check: (roster) => {
                             const nonTransportedUnits = roster.filter(item => {
                                 const unit = UNITS[item.name];
+                                // Check if unit lacks one of the "self-deploying" rules
                                 return !unit.rules.includes('Deep Strike') && !unit.rules.includes('Infiltrate') && !unit.type.includes('Flyer');
                             });
                             
-                            if (nonTransportedUnits.length > 0) {
+                            if (nonTransportedUnits.length > 0 && roster.length > 0) {
+                                // Only warn if there are actually units in the detachment
                                 return {
                                     valid: false,
-                                    message: `WARNING: ${nonTransportedUnits.length} units (e.g., ${nonTransportedUnits[0].name}) lack Deep Strike/Flyer and require Mycetic Spores for this formation.`,
+                                    message: `WARNING: ${nonTransportedUnits.length} units (e.g., ${nonTransportedUnits[0].name}) lack Deep Strike/Flyer and should be transported by Mycetic Spores.`,
                                     type: 'warning'
                                 };
                             }
@@ -317,7 +334,8 @@
                         check: (roster) => {
                             const titanCount = roster.filter(item => UNITS[item.name].rules.includes('Bio-Titan')).length;
                             
-                            if (titanCount < 1) {
+                            if (titanCount < 1 && roster.length > 0) {
+                                // Only error if the detachment has units but no Bio-Titan
                                 return {
                                     valid: false,
                                     message: 'ERROR: Bio-Titan Swarm requires at least one unit with the Bio-Titan rule.',
@@ -337,16 +355,16 @@
 
         // --- Application State ---
         let state = {
-            roster: [],
+            detachments: [], // Array of detachment instances
             totalPoints: 0,
-            selectedDetachment: 'None',
-            nextId: 1
+            nextDetachmentId: 1,
+            nextUnitId: 1000,
+            selectedDetachmentKey: 'Synaptic Swarm', // Default selected detachment type for adding new ones
+            activeDetachmentId: null, // ID of the detachment units should be added to
         };
 
         // --- DOM Elements ---
         const pointsDisplay = document.getElementById('points-display');
-        const detachmentSelect = document.getElementById('detachment-select');
-        const detachmentRules = document.getElementById('detachment-rules');
         const rosterList = document.getElementById('roster-list');
         const unitPool = document.getElementById('unit-pool');
         const constraintList = document.getElementById('constraint-list');
@@ -355,6 +373,11 @@
         const unitModal = document.getElementById('unit-modal');
         const modalContent = document.getElementById('modal-content');
 
+        // New DOM Refs
+        const newDetachmentSelect = document.getElementById('new-detachment-select');
+        const selectedDetachmentRules = document.getElementById('selected-detachment-rules');
+        const targetDetachmentSelect = document.getElementById('target-detachment-select');
+
 
         // --- Core Functions ---
 
@@ -362,21 +385,25 @@
          * Updates the global state and re-renders the UI components.
          */
         function updateUI() {
-            // 1. Update Points
-            state.totalPoints = state.roster.reduce((sum, item) => sum + item.cost, 0);
+            // 1. Update Points & Counts
+            state.totalPoints = state.detachments.reduce((detSum, det) => 
+                detSum + det.units.reduce((unitSum, unit) => unitSum + unit.cost, 0), 0);
             pointsDisplay.textContent = `${state.totalPoints}`;
+            
+            const totalUnits = state.detachments.reduce((count, det) => count + det.units.length, 0);
+            unitCountDisplay.textContent = `(${totalUnits} Broods)`;
 
             // 2. Update Roster List
             renderRoster();
 
-            // 3. Run Constraint Checks
+            // 3. Run Constraint Checks (Now runs per detachment)
             runConstraints();
             
-            // 4. Update Unit Count
-            unitCountDisplay.textContent = `(${state.roster.length} Broods)`;
+            // 4. Update Detachment selectors
+            renderTargetDetachmentSelect();
 
             // 5. Check if Roster is empty
-            if (state.roster.length > 0) {
+            if (state.detachments.length > 0) {
                 emptyRosterMessage.classList.add('hidden');
             } else {
                 emptyRosterMessage.classList.remove('hidden');
@@ -384,28 +411,56 @@
         }
 
         /**
-         * Renders the list of units in the current roster.
+         * Renders the list of units in the current roster, grouped by detachment.
          */
         function renderRoster() {
             rosterList.innerHTML = '';
-            state.roster.forEach(item => {
-                const itemEl = document.createElement('div');
-                itemEl.className = 'flex justify-between items-center bg-gray-700 p-3 rounded-lg border border-gray-600 shadow-md';
-                const upgradesList = item.currentUpgrades.map(u => u.name).join(', ');
+
+            state.detachments.forEach(detachmentInstance => {
+                const detData = DETACHMENTS[detachmentInstance.name];
                 
-                itemEl.innerHTML = `
-                    <div class="flex-grow">
-                        <p class="font-semibold text-gray-100">${item.name} <span class="text-sm text-teal-400">(${UNITS[item.name].type})</span></p>
-                        ${upgradesList ? `<p class="text-xs text-gray-400 italic">${upgradesList}</p>` : ''}
+                // Calculate detachment points
+                const detPoints = detachmentInstance.units.reduce((sum, unit) => sum + unit.cost, 0);
+                
+                const detEl = document.createElement('div');
+                detEl.className = 'bg-gray-700 p-4 rounded-xl border-t-4 border-teal-500 shadow-xl space-y-3';
+                detEl.innerHTML = `
+                    <div class="flex justify-between items-center pb-2 border-b border-gray-600">
+                        <h3 class="text-xl font-bold text-teal-400">${detData.name}</h3>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-lg font-bold text-red-400">${detPoints} pts</span>
+                            <button onclick="removeDetachment(${detachmentInstance.instanceId})" class="py-1 px-3 text-xs rounded-full bg-red-800 text-white hover:bg-red-700 transition duration-150 font-semibold" title="Remove Detachment">
+                                ❌ Remove Detachment
+                            </button>
+                        </div>
                     </div>
-                    <div class="flex items-center space-x-3">
-                        <span class="font-bold text-lg text-red-400">${item.cost} pts</span>
-                        <button onclick="removeUnit(${item.instanceId})" class="p-1 rounded-full bg-red-600 hover:bg-red-700 transition duration-150" title="Remove Unit">
-                            <span class="text-white">🗑</span>
-                        </button>
+                    <div id="detachment-units-${detachmentInstance.instanceId}" class="space-y-2">
+                        ${detachmentInstance.units.length === 0 ? '<p class="text-gray-400 italic text-sm text-center py-2">No broods in this formation yet.</p>' : ''}
                     </div>
                 `;
-                rosterList.appendChild(itemEl);
+                rosterList.appendChild(detEl);
+
+                const unitContainer = document.getElementById(`detachment-units-${detachmentInstance.instanceId}`);
+                
+                detachmentInstance.units.forEach(item => {
+                    const itemEl = document.createElement('div');
+                    itemEl.className = 'flex justify-between items-center bg-gray-600/50 p-3 rounded-lg border border-gray-600';
+                    const upgradesList = item.currentUpgrades.map(u => u.name).join(', ');
+                    
+                    itemEl.innerHTML = `
+                        <div class="flex-grow">
+                            <p class="font-semibold text-gray-100">${item.name} <span class="text-xs text-teal-300">(${UNITS[item.name].type})</span></p>
+                            ${upgradesList ? `<p class="text-xs text-gray-400 italic">${upgradesList}</p>` : ''}
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span class="font-bold text-md text-red-300">${item.cost} pts</span>
+                            <button onclick="removeUnit(${detachmentInstance.instanceId}, ${item.instanceId})" class="p-1 rounded-full bg-red-600 hover:bg-red-700 transition duration-150" title="Remove Unit">
+                                <span class="text-white">🗑</span>
+                            </button>
+                        </div>
+                    `;
+                    unitContainer.appendChild(itemEl);
+                });
             });
         }
 
@@ -428,7 +483,7 @@
                         <button onclick="showUnitModal('${unitName}')" class="flex-grow py-2 px-3 text-sm rounded-lg bg-gray-600 text-gray-200 hover:bg-gray-500 transition duration-150 flex items-center justify-center">
                             👁 Details
                         </button>
-                        <button onclick="addUnit('${unitName}')" class="flex-grow py-2 px-3 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700 transition duration-150 flex items-center justify-center">
+                        <button onclick="handleAddUnitClick('${unitName}')" class="flex-grow py-2 px-3 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700 transition duration-150 flex items-center justify-center">
                             ➕ Add
                         </button>
                     </div>
@@ -436,62 +491,223 @@
                 unitPool.appendChild(card);
             });
         }
-
+        
         /**
-         * Runs all constraint checks for the currently selected detachment.
+         * Handles the click on the 'Add' button in the unit pool.
          */
-        function runConstraints() {
-            constraintList.innerHTML = '';
-            const detachment = DETACHMENTS[state.selectedDetachment];
+        function handleAddUnitClick(unitName) {
+            const targetId = state.activeDetachmentId;
+            if (targetId === null) {
+                console.error("No detachment selected to add unit to.");
+                // Provide simple visual feedback (e.g., flash the target selector)
+                targetDetachmentSelect.classList.add('ring-4', 'ring-yellow-500', 'ring-opacity-50');
+                setTimeout(() => {
+                    targetDetachmentSelect.classList.remove('ring-4', 'ring-yellow-500', 'ring-opacity-50');
+                }, 500);
+                return;
+            }
+            // The targetId is stored as a number due to the onchange handler using parseInt
+            addUnit(unitName, targetId); 
+        }
+        
+        /**
+         * Adds a unit to a specific detachment.
+         */
+        function addUnit(unitName, detachmentId) {
+            const unitData = UNITS[unitName];
+            const detachment = state.detachments.find(d => d.instanceId === detachmentId);
             
-            if (detachment.name === 'No Formation') {
-                constraintList.innerHTML = `<p class="text-gray-400 text-sm">No constraints active.</p>`;
+            if (!detachment) {
+                console.error(`Detachment with ID ${detachmentId} not found.`);
                 return;
             }
 
-            detachment.constraints.forEach(constraint => {
-                const result = constraint.check(state.roster);
-                const icon = result.valid ? '✅' : (result.type === 'error' ? '❌' : '⚠️');
-                const color = result.valid ? 'text-green-400' : (result.type === 'error' ? 'text-red-400' : 'text-yellow-400');
-                const bgColor = result.valid ? 'bg-gray-700' : (result.type === 'error' ? 'bg-red-900/40 border border-red-500' : 'bg-yellow-900/40 border border-yellow-500');
-                
-                const itemEl = document.createElement('div');
-                itemEl.className = `flex items-start p-3 rounded-lg ${bgColor}`;
-                itemEl.innerHTML = `
-                    <span class="text-xl mr-3 mt-0.5 ${color} flex-shrink-0">${icon}</span>
-                    <p class="text-sm text-gray-200">${result.message}</p>
-                `;
-                constraintList.appendChild(itemEl);
-            });
-        }
-
-        /**
-         * Adds a unit to the roster, including its base cost and upgrades.
-         */
-        function addUnit(unitName) {
-            const unitData = UNITS[unitName];
-            // Calculate instance cost, assuming all listed upgrades are taken by default for simplicity
+            // Calculate instance cost, including all upgrades (assuming all are taken for simplicity)
             const upgradeCost = unitData.upgrades.reduce((sum, u) => sum + u.cost, 0); 
             const instanceCost = unitData.cost + upgradeCost;
             
             const newUnit = {
-                instanceId: state.nextId++,
+                instanceId: state.nextUnitId++,
                 name: unitName,
                 cost: instanceCost,
-                // Clone all upgrades to the roster item
-                currentUpgrades: unitData.upgrades.map(u => ({ name: u.name, cost: u.cost })) 
+                currentUpgrades: unitData.upgrades.map(u => ({ name: u.name, cost: u.cost }))
             };
 
-            state.roster.push(newUnit);
+            detachment.units.push(newUnit);
             updateUI();
         }
 
         /**
-         * Removes a unit from the roster by its unique instance ID.
+         * Removes a unit from the roster by its unique instance ID within a detachment.
          */
-        function removeUnit(instanceId) {
-            state.roster = state.roster.filter(item => item.instanceId !== instanceId);
+        function removeUnit(detachmentId, unitInstanceId) {
+            const detachment = state.detachments.find(d => d.instanceId === detachmentId);
+            if (detachment) {
+                detachment.units = detachment.units.filter(item => item.instanceId !== unitInstanceId);
+                updateUI();
+            } else {
+                console.error(`Detachment with ID ${detachmentId} not found for unit removal.`);
+            }
+        }
+        
+        /**
+         * Adds a new detachment instance to the roster.
+         */
+        function handleAddDetachment() {
+            const detKey = newDetachmentSelect.value;
+            if (!detKey || detKey === 'None') {
+                console.warn("Cannot add 'None' detachment.");
+                return;
+            }
+            
+            const newDetachment = {
+                instanceId: state.nextDetachmentId++,
+                name: detKey,
+                units: [],
+            };
+            
+            state.detachments.push(newDetachment);
+            
+            // Set the newly added detachment as the active target
+            state.activeDetachmentId = newDetachment.instanceId;
+            
             updateUI();
+        }
+        
+        /**
+         * Removes a detachment instance and all its units.
+         */
+        function removeDetachment(detachmentId) {
+            state.detachments = state.detachments.filter(d => d.instanceId !== detachmentId);
+            
+            // If the active detachment was removed, clear the active ID or set to the first remaining one.
+            if (state.activeDetachmentId === detachmentId) {
+                state.activeDetachmentId = state.detachments.length > 0 ? state.detachments[0].instanceId : null;
+            }
+            updateUI();
+        }
+
+        /**
+         * Renders the Target Detachment selector in the unit pool section.
+         */
+        function renderTargetDetachmentSelect() {
+            targetDetachmentSelect.innerHTML = '';
+            
+            if (state.detachments.length === 0) {
+                targetDetachmentSelect.disabled = true;
+                targetDetachmentSelect.innerHTML = '<option value="" disabled selected>Add a Formation first</option>';
+                state.activeDetachmentId = null;
+                return;
+            }
+
+            targetDetachmentSelect.disabled = false;
+            
+            state.detachments.forEach(detachmentInstance => {
+                const option = document.createElement('option');
+                option.value = detachmentInstance.instanceId;
+                option.textContent = `${DETACHMENTS[detachmentInstance.name].name} (ID: ${detachmentInstance.instanceId})`;
+                targetDetachmentSelect.appendChild(option);
+            });
+            
+            // Set the active detachment selection
+            if (state.activeDetachmentId && targetDetachmentSelect.querySelector(`option[value="${state.activeDetachmentId}"]`)) {
+                targetDetachmentSelect.value = state.activeDetachmentId;
+            } else {
+                // Default to the first one if none is active or the previously active one was removed
+                state.activeDetachmentId = state.detachments[0].instanceId;
+                targetDetachmentSelect.value = state.activeDetachmentId;
+            }
+        }
+
+        /**
+         * Runs all constraint checks for all detachments.
+         */
+        function runConstraints() {
+            constraintList.innerHTML = '';
+            
+            if (state.detachments.length === 0) {
+                constraintList.innerHTML = `<p class="text-gray-400 text-sm">Add a Swarm Formation to check compliance.</p>`;
+                return;
+            }
+            
+            let allValid = true;
+
+            state.detachments.forEach(detachmentInstance => {
+                const detData = DETACHMENTS[detachmentInstance.name];
+                
+                const detHeader = document.createElement('h4');
+                detHeader.className = 'text-lg font-semibold text-teal-300 border-b border-gray-600 mb-2 mt-4 first:mt-0';
+                detHeader.textContent = `Constraints for: ${detData.name} (ID: ${detachmentInstance.instanceId})`;
+                constraintList.appendChild(detHeader);
+
+                if (detData.constraints.length === 0) {
+                    const msg = document.createElement('p');
+                    msg.className = 'text-gray-400 text-sm italic';
+                    msg.textContent = 'No specific constraints for this formation.';
+                    constraintList.appendChild(msg);
+                    return;
+                }
+                
+                detData.constraints.forEach(constraint => {
+                    // Check against only the units in this specific detachment
+                    const result = constraint.check(detachmentInstance.units); 
+                    
+                    if (!result.valid) {
+                        allValid = false;
+                    }
+
+                    const icon = result.valid ? '✅' : (result.type === 'error' ? '❌' : '⚠️');
+                    const color = result.valid ? 'text-green-400' : (result.type === 'error' ? 'text-red-400' : 'text-yellow-400');
+                    const bgColor = result.valid ? 'bg-gray-700' : (result.type === 'error' ? 'bg-red-900/40 border border-red-500' : 'bg-yellow-900/40 border border-yellow-500');
+                    
+                    const itemEl = document.createElement('div');
+                    itemEl.className = `flex items-start p-3 rounded-lg ${bgColor}`;
+                    itemEl.innerHTML = `
+                        <span class="text-xl mr-3 mt-0.5 ${color} flex-shrink-0">${icon}</span>
+                        <p class="text-sm text-gray-200">${result.message}</p>
+                    `;
+                    constraintList.appendChild(itemEl);
+                });
+            });
+            
+            // Show overall compliance message
+            if (state.detachments.length > 0) {
+                 const allGoodMsg = document.createElement('div');
+                 allGoodMsg.className = `p-3 rounded-lg font-semibold mt-4 ${allValid ? 'bg-green-900/40 border border-green-500 text-green-300' : 'bg-yellow-900/40 border border-yellow-500 text-yellow-300'}`;
+                 allGoodMsg.textContent = allValid ? 
+                    'All Detachments are currently compliant with their formation rules!' : 
+                    'Review the warnings and errors above. Not all Detachments are compliant.';
+                 constraintList.prepend(allGoodMsg);
+            }
+        }
+        
+        /**
+         * Initializes the new detachment selection dropdown.
+         */
+        function initializeDetachmentSelect() {
+            newDetachmentSelect.innerHTML = '';
+            
+            // Filter out 'None' for adding, as it's not a proper formation
+            const validDetachments = Object.keys(DETACHMENTS).filter(key => key !== 'None');
+
+            validDetachments.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = DETACHMENTS[name].name;
+                newDetachmentSelect.appendChild(option);
+            });
+
+            // Set up initial state and listener for rules preview
+            if (validDetachments.length > 0) {
+                state.selectedDetachmentKey = validDetachments[0];
+                newDetachmentSelect.value = state.selectedDetachmentKey;
+                selectedDetachmentRules.textContent = DETACHMENTS[state.selectedDetachmentKey].rules;
+            }
+            
+            newDetachmentSelect.addEventListener('change', (event) => {
+                state.selectedDetachmentKey = event.target.value;
+                selectedDetachmentRules.textContent = DETACHMENTS[state.selectedDetachmentKey].rules;
+            });
         }
 
         /**
@@ -553,28 +769,6 @@
             }, 300);
         }
 
-        /**
-         * Initializes the detachment dropdown and sets up event listener.
-         */
-        function initializeDetachmentSelect() {
-            detachmentSelect.innerHTML = '';
-            Object.keys(DETACHMENTS).forEach(name => {
-                const option = document.createElement('option');
-                option.value = name;
-                option.textContent = DETACHMENTS[name].name;
-                detachmentSelect.appendChild(option);
-            });
-
-            // Set up initial state and listener
-            detachmentSelect.value = state.selectedDetachment;
-            detachmentRules.textContent = DETACHMENTS[state.selectedDetachment].rules;
-            
-            detachmentSelect.addEventListener('change', (event) => {
-                state.selectedDetachment = event.target.value;
-                detachmentRules.textContent = DETACHMENTS[state.selectedDetachment].rules;
-                updateUI();
-            });
-        }
         
         // --- Initialization ---
         window.onload = function() {
