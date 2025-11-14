@@ -1,437 +1,1331 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { LogOut, Plus, Trash2, Edit2, Check, X, Users, Zap, Hash, ChevronsUp, ChevronsDown, Minus } from 'lucide-react';
-
-// --- MOCK DATA & CONFIG ---
-// Global variables provided by the Canvas environment
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-// Mock data for Swarms to populate the dropdown
-const MOCK_SWARMS = [
-  { id: 'hgaunts', name: 'Hormagaunts', points: 50, traits: 'Horde, Melee' },
-  { id: 'tgaunts', name: 'Termagants', points: 55, traits: 'Horde, Ranged' },
-  { id: 'gargoyles', name: 'Gargoyles', points: 60, pointsPerModel: 12, traits: 'Fly, Fast' },
-  { id: 'lictor', name: 'Lictor', pointsPerModel: 75, traits: 'Infiltrate, Stealth' },
-  { id: 'warrior', name: 'Tyranid Warrior', pointsPerModel: 20, traits: 'Synapse, Durable' },
-];
-
-const swarmTypeToIcon = (type) => {
-  switch (type) {
-    case 'hgaunts': return <Zap className="w-4 h-4 text-pink-500" />;
-    case 'tgaunts': return <Hash className="w-4 h-4 text-blue-500" />;
-    case 'gargoyles': return <ChevronsUp className="w-4 h-4 text-green-500" />;
-    case 'lictor': return <Users className="w-4 h-4 text-red-500" />;
-    case 'warrior': return <ChevronsDown className="w-4 h-4 text-purple-500" />;
-    default: return <Plus className="w-4 h-4 text-gray-400" />;
-  }
-};
-
-const getModelPoints = (typeId) => {
-    // Finds the base points per model. If not specified, calculates based on a default squad size of 5 for MOCK_SWARMS base points.
-    const swarm = MOCK_SWARMS.find(s => s.id === typeId);
-    // Use pointsPerModel if available, otherwise default to a calculated value or 10.
-    return swarm?.pointsPerModel || Math.ceil(swarm?.points / 5) || 10;
-};
-
-// --- FIREBASE INITIALIZATION & STATE ---
-function App() {
-  const [db, setDb] = useState(null);
-  const [auth, setAuth] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-
-  // Brood State
-  const [brood, setBrood] = useState(null);
-  const [broodName, setBroodName] = useState('');
-  const [isEditingName, setIsEditingName] = useState(false);
-
-  // New Swarm State (User Request)
-  const [selectedSwarmId, setSelectedSwarmId] = useState('');
-
-  // UI State
-  const [loading, setLoading] = useState(true);
-  const [snackbarMessage, setSnackbarMessage] = useState(null);
-
-  // Firebase Initialization and Authentication
-  useEffect(() => {
-    if (!firebaseConfig) {
-      console.error("Firebase config is missing.");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const app = initializeApp(firebaseConfig);
-      const firestore = getFirestore(app);
-      const firebaseAuth = getAuth(app);
-
-      setDb(firestore);
-      setAuth(firebaseAuth);
-
-      const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
-        if (!user) {
-          try {
-            if (initialAuthToken) {
-              await signInWithCustomToken(firebaseAuth, initialAuthToken);
-            } else {
-              await signInAnonymously(firebaseAuth);
-            }
-          } catch (error) {
-            console.error("Authentication error:", error);
-          }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hive War Army Builder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for aesthetic enhancements */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text */
         }
-        setUserId(firebaseAuth.currentUser?.uid || 'anonymous');
-        setIsAuthReady(true);
-      });
-
-      return () => unsubscribe();
-    } catch (error) {
-      console.error("Error initializing Firebase:", error);
-      setLoading(false);
-    }
-  }, []);
-
-  // Firestore Data Listener
-  useEffect(() => {
-    if (!isAuthReady || !db || !userId) return;
-
-    // Use a fixed Brood ID for simplicity in this single-user app structure
-    const broodId = 'my-hive-fleet-brood';
-    // Path: /artifacts/{appId}/users/{userId}/broods/{broodId}
-    const broodDocRef = doc(db, `artifacts/${appId}/users/${userId}/broods`, broodId);
-
-    const unsubscribe = onSnapshot(broodDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setBrood(data);
-        setBroodName(data.name || 'New Brood');
-      } else {
-        // Create initial brood document if it doesn't exist
-        setBrood(null);
-        setBroodName('New Brood');
-        // Will be created on first save/add
-      }
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching brood data:", error);
-      setLoading(false);
-      setSnackbarMessage({ text: 'Failed to load data. Check console for details.', type: 'error' });
-    });
-
-    return () => unsubscribe();
-  }, [isAuthReady, db, userId, appId]);
-
-  // --- HANDLERS ---
-
-  const createOrUpdateBrood = async (updateData) => {
-    if (!db || !userId || !isAuthReady) return;
-    const broodId = 'my-hive-fleet-brood';
-    const broodDocRef = doc(db, `artifacts/${appId}/users/${userId}/broods`, broodId);
-
-    const baseData = {
-        name: broodName,
-        swarms: brood?.swarms || [],
-        createdAt: brood?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-    };
-
-    try {
-        if (!brood) {
-            // Document creation (setDoc with merge: true for safety)
-            await setDoc(broodDocRef, { ...baseData, ...updateData }, { merge: true });
-        } else {
-            // Document update
-            await updateDoc(broodDocRef, updateData);
+        .tab-content {
+            min-height: 500px;
         }
-        return true;
-    } catch (error) {
-        console.error("Error updating brood:", error);
-        setSnackbarMessage({ text: 'Failed to save changes. Please try again.', type: 'error' });
-        return false;
-    }
-  };
-
-  const handleNameSave = async () => {
-    if (!broodName.trim()) {
-      setSnackbarMessage({ text: 'Brood name cannot be empty.', type: 'error' });
-      return;
-    }
-    const success = await createOrUpdateBrood({ name: broodName.trim() });
-    if (success) setIsEditingName(false);
-  };
-
-  const handleAddSwarm = async () => {
-    if (!db || !userId) return;
-
-    if (!selectedSwarmId) {
-        setSnackbarMessage({ text: 'Please select a Swarm type first.', type: 'error' });
-        return;
-    }
-
-    const swarmData = MOCK_SWARMS.find(s => s.id === selectedSwarmId);
-    if (!swarmData) {
-        setSnackbarMessage({ text: 'Invalid Swarm type selected.', type: 'error' });
-        return;
-    }
-
-    const newSwarm = {
-        id: crypto.randomUUID(), // Unique ID for this instance
-        typeId: swarmData.id,
-        name: swarmData.name,
-        // Using pointsPerModel for accurate calculation, falling back to base points for display/initial logic
-        points: swarmData.points || swarmData.pointsPerModel * 5, 
-        traits: swarmData.traits,
-        size: 5, // Default starting size
-        pointsPerModel: getModelPoints(swarmData.id) // Calculate and store points per model
-    };
-
-    const success = await createOrUpdateBrood({ swarms: arrayUnion(newSwarm) });
-    if (success) {
-        // Clear the dropdown after adding
-        setSelectedSwarmId('');
-        setSnackbarMessage({ text: `${swarmData.name} added successfully!`, type: 'success' });
-    }
-  };
-
-  const handleDeleteSwarm = async (swarmId) => {
-    if (!brood) return;
-
-    const swarmToRemove = brood.swarms.find(s => s.id === swarmId);
-    if (!swarmToRemove) return;
-
-    const success = await createOrUpdateBrood({ swarms: arrayRemove(swarmToRemove) });
-    if (success) {
-        setSnackbarMessage({ text: `${swarmToRemove.name} removed.`, type: 'info' });
-    }
-  };
-
-  const handleSizeChange = async (swarmId, delta) => {
-    if (!brood) return;
-
-    const updatedSwarms = brood.swarms.map(s => {
-      if (s.id === swarmId) {
-        const newSize = Math.max(0, s.size + delta); // Min size 0
-        return { ...s, size: newSize };
-      }
-      return s;
-    }).filter(s => s.size > 0); // Remove swarm if size hits zero
-
-    // Only update if the list is different (i.e., size changed or swarm was removed)
-    if (JSON.stringify(updatedSwarms) !== JSON.stringify(brood.swarms)) {
-        const success = await createOrUpdateBrood({ swarms: updatedSwarms });
-        if (success) {
-            if (updatedSwarms.length < brood.swarms.length) {
-                 setSnackbarMessage({ text: `Swarm removed as size reached 0.`, type: 'info' });
-            }
+        .tab-button {
+            transition: all 0.2s;
         }
-    }
-  };
+        .active-tab {
+            background-color: #4a5568;
+            border-bottom: 2px solid #a0aec0;
+        }
+        .card {
+            background-color: #2d3748; /* Slightly lighter dark background for cards */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        select, button {
+            cursor: pointer;
+        }
+        /* Custom scrollbar styling for the unit list later */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #4b5563;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background-color: #1f2937;
+        }
+    </style>
+</head>
+<body>
 
-  // --- CALCULATED VALUES ---
+    <div id="app" class="max-w-4xl mx-auto p-4 md:p-8">
+        <h1 class="text-4xl font-extrabold text-center mb-8 text-green-400">Tyranid Hive War Builder</h1>
 
-  const totalBroodPoints = useMemo(() => {
-    if (!brood?.swarms) return 0;
-    return brood.swarms.reduce((total, swarm) => {
-      // Points calculation: Points Per Model * current size
-      // Use the stored pointsPerModel value
-      const pointsPerModel = swarm.pointsPerModel; 
-      return total + (pointsPerModel * swarm.size);
-    }, 0);
-  }, [brood]);
-
-
-  // --- UI COMPONENTS ---
-
-  const Snackbar = ({ message, type }) => {
-    useEffect(() => {
-      if (message) {
-        const timer = setTimeout(() => setSnackbarMessage(null), 3000);
-        return () => clearTimeout(timer);
-      }
-    }, [message]);
-
-    if (!message) return null;
-
-    const baseStyle = "fixed bottom-5 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl text-white font-semibold transition-opacity duration-300 z-50";
-    const typeStyle = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-indigo-600';
-
-    return (
-      <div className={`${baseStyle} ${typeStyle}`}>
-        {message.text}
-      </div>
-    );
-  };
-
-  const BroodCard = ({ swarm }) => {
-      // Calculate points for this specific card using the stored value (minor clarity update)
-      const pointsPerModel = swarm.pointsPerModel; 
-      const cardPoints = pointsPerModel * swarm.size;
-
-    return (
-      <div className="bg-white p-4 rounded-xl shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between transition duration-300 hover:shadow-xl border border-gray-100">
-        <div className="flex items-center gap-3 mb-3 sm:mb-0">
-          <div className="p-2 bg-gray-100 rounded-full flex-shrink-0">
-            {swarmTypeToIcon(swarm.typeId)}
-          </div>
-          <div>
-            <div className="text-lg font-bold text-gray-800">{swarm.name}</div>
-            <div className="text-sm text-gray-500 font-mono italic">{swarm.traits}</div>
-          </div>
+        <div class="flex border-b border-gray-700 mb-6">
+            <button id="tab-home" class="tab-button py-3 px-6 text-lg font-medium rounded-t-lg hover:bg-gray-700 active-tab" onclick="setActiveTab('home')">Home</button>
+            <button id="tab-army-build" class="tab-button py-3 px-6 text-lg font-medium rounded-t-lg hover:bg-gray-700" onclick="setActiveTab('army-build')">Army Build</button>
+            <button id="tab-roster" class="tab-button py-3 px-6 text-lg font-medium rounded-t-lg hover:bg-gray-700" onclick="setActiveTab('roster')">Roster</button>
         </div>
 
-        <div className="flex items-center gap-4">
-            {/* Size Control */}
-            <div className="flex items-center space-x-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
-                <button
-                    onClick={() => handleSizeChange(swarm.id, -1)}
-                    className="p-1 bg-red-100 text-red-600 rounded-full hover:bg-red-200 transition disabled:opacity-30"
-                    disabled={swarm.size <= 0}
-                    title="Decrease Size by 1 (Min 0)"
-                >
-                    <Minus className="w-4 h-4" />
-                </button>
-                <span className="text-base font-semibold text-gray-700 w-10 text-center">Size: {swarm.size}</span>
-                <button
-                    onClick={() => handleSizeChange(swarm.id, 1)}
-                    className="p-1 bg-green-100 text-green-600 rounded-full hover:bg-green-200 transition"
-                    title="Increase Size by 1"
-                >
-                    <Plus className="w-4 h-4" />
-                </button>
+        <div id="content" class="tab-content">
             </div>
 
-            {/* Points and Delete */}
-            <div className="text-lg font-bold text-indigo-600 mr-2 min-w-[70px] text-right">{cardPoints} pts</div>
-            <button
-              onClick={() => handleDeleteSwarm(swarm.id)}
-              className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition shadow-md flex-shrink-0"
-              title="Remove Swarm"
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
-        </div>
-      </div>
-    );
-  };
+    </div>
 
+    <script>
+        // --- DATA DEFINITIONS ---
+        
+        // Swarm Special Rules (Used for Formation Rules list)
+        const SWARM_SPECIAL_RULES = {
+            'Synaptic Control': 'If your Warlord is a SYNAPSE unit, you may re-roll one failed command check per turn.',
+            'Endless Swarm': 'If a CORE unit is destroyed, on a 5+ it may be returned to the board from any board edge during your next command phase.',
+            'Shadow in the Warp': 'All enemy units within 12" of a SYNAPSE unit suffer -1 to their Command checks.',
+            'Instinctive Behaviour': 'If a unit not within 12" of a SYNAPSE unit fails a command check, it must move towards the nearest enemy unit.',
+            'Assault Swarm': 'All units in the detachment with the Instinct: Rampage rule gain +1 to their CAF.',
+            'Late Stage Invasion': 'During the last stages of the invasion, the Hive Mind is prioritizing the consumption of bio-mass and this formation may deploy all broods during turn one.',
+            'Winged': 'Change movement to flying, movement profile 10".'
+        };
 
-  if (loading || !isAuthReady) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-2xl font-semibold text-indigo-600 animate-pulse">Loading Hive Fleet Data...</div>
-      </div>
-    );
-  }
+        // Data structure for Swarm Formations (from Swarm Formation Table.xlsx - Sheet1.csv)
+        const SWARM_FORMATIONS = {
+            'Select a Formation': {
+                compulsory: [],
+                optional: [],
+                special: null,
+                formationRule: null 
+            },
+            'Synaptic Swarm': {
+                compulsory: [
+                    { type: 'Synapse', max: 1, rules: ['Synaptic Control', 'Shadow in the Warp'] },
+                    { type: 'Core', max: 3, rules: ['Endless Swarm', 'Instinctive Behaviour'] }
+                ],
+                optional: [
+                    { type: 'Synapse', max: 2, rules: ['Synaptic Control', 'Shadow in the Warp'] },
+                    { type: 'Core', max: 6, rules: ['Endless Swarm', 'Instinctive Behaviour'] }
+                ],
+                special: 'Biotitan or Flyer (Max 1)',
+                formationRule: null
+            },
+            'Assault Swarm': {
+                compulsory: [
+                    { type: 'Synapse', max: 1, rules: ['Synaptic Control', 'Shadow in the Warp'] },
+                    { type: 'Core', max: 3, rules: ['Endless Swarm', 'Instinctive Behaviour'] },
+                    { type: 'Transport', max: 1, rules: [] }
+                ],
+                optional: [
+                    { type: 'Synapse', max: 2, rules: ['Synaptic Control', 'Shadow in the Warp'] },
+                    { type: 'Core', max: 6, rules: ['Endless Swarm', 'Instinctive Behaviour'] },
+                    { type: 'Flyer', max: 2, rules: [] }
+                ],
+                special: null,
+                formationRule: 'Assault Swarm' 
+            },
+            'Bio-Titan Swarm': {
+                compulsory: [
+                    { type: 'Biotitan', max: 3, rules: [] }
+                ],
+                optional: [
+                    { type: 'Biotitan', max: 3, rules: [] }
+                ],
+                special: null,
+                formationRule: 'Late Stage Invasion' 
+            }
+        };
 
-  return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-[Inter]">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-2 flex items-center">
-          <img src="https://placehold.co/40x40/500096/ffffff?text=H" onError={(e)=>{e.target.onerror=null; e.target.src='https://placehold.co/40x40/500096/ffffff?text=H'}} alt="Hive Icon" className="mr-3 rounded-md" />
-          Hive War Brood Builder
-        </h1>
-        <p className="text-gray-500 mb-6">User ID: <span className='font-mono text-xs break-all'>{userId}</span></p>
+        // Unit Data consolidated and verified with LI_HiveWar_02.docx (Page 15-43)
+        // UPDATED WITH NEW CSV DATA
+        const TYRANID_UNITS_DATA = [
+            {
+                name: 'Hive Tyrant Brood', cost: 150, slotType: 'Synapse', unitSubType: 'Monster', isBaseUnit: true, // Page 15
+                stats: { M: '5”', Sv: '4+', CAF: '+6', Morale: '2+', W: 3, scaleSize: 2 },
+                rules: ['Synapse (12”)', 'Psychic Powers', 'Instinct: Nest'],
+                baseWeapons: [
+                    { name: 'Heavy Venom Cannon', range: '14”', dice: 2, toHit: '5+', AP: -2, traits: 'Anti-Tank' },
+                    { name: 'Monstrous Scything Talons', range: 'CC', dice: 3, toHit: '2+', AP: -1, traits: 'Rending' }
+                ],
+                upgrades: [
+                    { name: 'Tyrant Guard Brood', cost: 50, type: 'WARGEAR' }, // Page 15
+                    // UPDATED COST and RULE for Wings
+                    { name: 'Add Wings', cost: 20, type: 'WARGEAR_RULE', rule: 'Winged' }, 
+                    // NEW: Swarm Lord Profile Change
+                    { 
+                        name: 'Upgrade to Swarm Lord', cost: 25, type: 'PROFILE_CHANGE', 
+                        profileUpdates: { CAF: '+14', W: 3 }, // Wounds stays 3, CAF changes
+                        removesWeapon: 'Heavy Venom Cannon',
+                        rules: ['Swarm Lord']
+                    }, 
+                    // NEW: Specific Psychic Powers (Replacing generic Psychic Mastery)
+                    { name: 'Psychic Power: The Horror', cost: 15, type: 'PSYCHIC_POWER', rule: 'The Horror' },
+                    { name: 'Psychic Power: Catalyst', cost: 15, type: 'PSYCHIC_POWER', rule: 'Catalyst' }, 
+                    // Weapon Replacements for Heavy Venom Cannon (HVC)
+                    { name: 'Replace HVC with Twin Devourer', cost: 10, type: 'WEAPON', originalWeaponName: 'Heavy Venom Cannon', 
+                        weaponData: { name: 'Twin Devourer', range: '10”', dice: 4, toHit: '4+', AP: 0, traits: 'Light AT' } },
+                    { name: 'Replace HVC with Twin Linked Lash Whips', cost: 15, type: 'WEAPON', originalWeaponName: 'Heavy Venom Cannon', 
+                        weaponData: { name: 'Twin Linked Lash Whips', range: '10”', dice: 3, toHit: '4+', AP: 0, traits: 'Attract, Pinning' } },
+                    { name: 'Replace HVC with Stranglethorn Cannon', cost: 15, type: 'WEAPON', originalWeaponName: 'Heavy Venom Cannon', 
+                        weaponData: { name: 'Stranglethorn Cannon', range: '16”', dice: 2, toHit: '4+', AP: -1, traits: 'Anti-Tank, Blast (3”)' } }
+                ]
+            },
+            {
+                name: 'Tyranid Warrior Brood', cost: 60, slotType: 'Synapse', unitSubType: 'Infantry', isBaseUnit: true, // Page 16
+                stats: { M: '5”', Sv: '5+', CAF: '+5', Morale: '3+', W: 1, scaleSize: 1, baseSize: 3, maxSize: 12, modelCost: 50, modelIncrement: 3 }, // MaxSize updated to 12
+                rules: ['Synapse (8”)', 'Instinct: Hunt'],
+                baseWeapons: [
+                    { name: 'Death Spitter', range: '10”', dice: 2, toHit: '5+', AP: 0, traits: 'Light AT' }, 
+                    { name: 'Scything Talons', range: 'CC', dice: 2, toHit: '2+', AP: 0, traits: '-' }
+                ],
+                upgrades: [
+                    // UPDATED COST: Weapon Replacements for Death Spitter (15 per stand)
+                    { name: 'Upgrade to Venom Cannons', cost: 15, type: 'WEAPON', originalWeaponName: 'Death Spitter', 
+                        weaponData: { name: 'Venom Cannon', range: '14”', dice: 2, toHit: '5+', AP: -2, traits: 'Anti-Tank' } }, 
+                    { name: 'Upgrade to Barbed Stranglers', cost: 15, type: 'WEAPON', originalWeaponName: 'Death Spitter', 
+                        weaponData: { name: 'Barbed Strangler', range: '10”', dice: 1, toHit: '4+', AP: 0, traits: 'Light AT, Blast (3”)' } } ,
+                    // UPDATED COST: Weapon Replacement for Scything Talons (3 per model * 3 models/stand = 9 pts/stand)
+                    { name: 'Replace Scything Talons with Bone Swords', cost: 9, type: 'WEAPON', originalWeaponName: 'Scything Talons', 
+                        weaponData: { name: 'Bone Swords', range: 'CC', dice: 2, toHit: '2+', AP: -1, traits: 'Rending' } }, 
+                    // UPDATED COST for model increase
+                    { name: 'Add +3 Warrior Models', cost: 50, type: 'MODEL_INCREASE', max: 3, increment: 3 } // Max is 3 upgrades (3+3+3+3=12)
+                ]
+            },
+            {
+                name: 'Mycetic Spore Brood', cost: 20, slotType: 'Transport', unitSubType: 'Transport', isBaseUnit: true, // Page 18
+                stats: { M: '5”', Sv: '4+', CAF: '+2', Morale: '4+', W: 1, scaleSize: 2 },
+                rules: ['Deep Strike', 'Transport (1)', 'Instinct: Nest'],
+                baseWeapons: [],
+                upgrades: [
+                    { name: 'Add +1 Mycetic Spore Brood', cost: 20, type: 'UNIT_ADDITION' }
+                ]
+            },
+            {
+                name: 'Termagant Swarm', cost: 40, slotType: 'Core', unitSubType: 'Infantry', isBaseUnit: true, // Page 20
+                stats: { M: '5”', Sv: '6+', CAF: '+2', Morale: '4+', W: 1, baseSize: 6, maxSize: 12, modelCost: 10, modelIncrement: 3, scaleSize: 1 }, 
+                rules: ['Instinct: Hunt'],
+                baseWeapons: [{ name: 'Fleshborer', range: '8”', dice: 6, toHit: '5+', AP: 0, traits: '-' }],
+                upgrades: [
+                    // Model Increase: Confirmed 10 pts, Max 2 upgrades (6+3+3=12)
+                    { name: 'Increase Brood by +3 Models', cost: 10, type: 'MODEL_INCREASE', max: 2, increment: 3 }, 
+                    // NEW Weapon Upgrade (3 per model * 3 models/stand = 9 pts/stand)
+                    { name: 'Replace Fleshborer with Stranglewebs', cost: 9, type: 'WEAPON', originalWeaponName: 'Fleshborer', 
+                        weaponData: { name: 'Stranglewebs', range: '8”', dice: 4, toHit: '4+', AP: 0, traits: 'Blast (3”)' } },
+                    // UPDATED COST (1 per model * 3 models/stand = 3 pts/stand)
+                    { name: 'Replace Fleshborer with Devourer', cost: 3, type: 'WEAPON', originalWeaponName: 'Fleshborer', 
+                        weaponData: { name: 'Devourer', range: '10”', dice: 8, toHit: '4+', AP: 0, traits: '-' } }
+                ]
+            },
+            {
+                name: 'Hormagaunt Swarm', cost: 40, slotType: 'Core', unitSubType: 'Infantry', isBaseUnit: true, // Page 21
+                stats: { M: '6”', Sv: '6+', CAF: '+3', Morale: '4+', W: 1, baseSize: 6, maxSize: 12, modelCost: 10, modelIncrement: 3, scaleSize: 1 },
+                rules: ['Instinct: Rampage'],
+                baseWeapons: [{ name: 'Scything Talons', range: 'CC', dice: 6, toHit: '3+', AP: 0, traits: 'Rending' }],
+                upgrades: [
+                    { name: 'Increase Brood by +3 Models', cost: 10, type: 'MODEL_INCREASE', max: 2, increment: 3 }
+                ]
+            },
+            {
+                name: 'Genestealer Brood', cost: 70, slotType: 'Core', unitSubType: 'Infantry', isBaseUnit: true, // Page 22
+                stats: { M: '8”', Sv: '6+', CAF: '+4', Morale: '3+', W: 1, baseSize: 6, maxSize: 12, modelCost: 15, modelIncrement: 3, scaleSize: 1 },
+                rules: ['Infiltrate', 'Instinct: Hunt'],
+                baseWeapons: [{ name: 'Claws and Talons', range: 'CC', dice: 6, toHit: '3+', AP: -1, traits: 'Rending' }],
+                upgrades: [
+                    { name: 'Increase Brood by +3 Models', cost: 15, type: 'MODEL_INCREASE', max: 2, increment: 3 }
+                ]
+            },
+            {
+                name: 'Trygon Brood', cost: 100, slotType: 'Biotitan', unitSubType: 'Monster', isBaseUnit: true, // Page 41
+                stats: { M: '8”', Sv: '4+', CAF: '+4', Morale: '3+', W: 4, scaleSize: 2 },
+                rules: ['Burrow', 'Instinct: Hunt'],
+                baseWeapons: [{ name: 'Massive Scything Talons', range: 'CC', dice: 4, toHit: '2+', AP: -1, traits: 'Rending, Heavy' }],
+                upgrades: [
+                    { name: 'Add +1 Trygon Brood', cost: 100, type: 'UNIT_ADDITION' } 
+                ]
+            },
+            {
+                name: 'Harridan Brood', cost: 250, slotType: 'Flyer', unitSubType: 'Aircraft', isBaseUnit: true, // Page 37
+                stats: { M: 'Flyer', Sv: '3+', CAF: '+3', Morale: '3+', W: 6, scaleSize: 3 },
+                rules: ['Flyer', 'Winged', 'Instinct: Nest'],
+                baseWeapons: [{ name: 'Twin Bio-Cannons', range: '14”', dice: 4, toHit: '4+', AP: -1, traits: 'Anti-Tank' }],
+                upgrades: [
+                    { name: 'Add +1 Harridan Brood', cost: 250, type: 'UNIT_ADDITION' } 
+                ]
+            },
+            {
+                name: 'Hierophant Bio-Titan', cost: 500, slotType: 'Biotitan', unitSubType: 'Titan', isBaseUnit: true, // Page 43
+                stats: { M: '6”', Sv: '2+', CAF: '+7', Morale: '2+', W: 10, scaleSize: 3 },
+                rules: ['Titan', 'Regeneration', 'Instinct: Nest'],
+                baseWeapons: [{ name: 'Bio-Cannons', range: '16”', dice: 6, toHit: '3+', AP: -2, traits: 'Anti-Tank, Blast (5”)' }],
+                upgrades: []
+            }
+        ];
 
-        {/* --- TOP SECTION: Brood Info & Swarm Addition --- */}
-        <div className="bg-white p-5 shadow-2xl rounded-xl border-4 border-indigo-600 mb-8">
-            <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Brood Configuration</h2>
+        // Helper to get unit data by name
+        function getUnitTemplate(unitName) {
+            return TYRANID_UNITS_DATA.find(u => u.name === unitName);
+        }
 
-            {/* Row 1: Brood Name and Points */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                <div className="flex items-center flex-grow">
-                    {isEditingName ? (
-                        <>
-                            <input
-                                type="text"
-                                value={broodName}
-                                onChange={(e) => setBroodName(e.target.value)}
-                                className="flex-grow p-2 border border-indigo-300 rounded-l-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 text-lg font-semibold"
-                            />
-                            <button
-                                onClick={handleNameSave}
-                                className="p-2 bg-green-500 text-white rounded-r-lg hover:bg-green-600 transition"
-                                title="Save Name"
-                            >
-                                <Check className="w-6 h-6" />
-                            </button>
-                            <button
-                                onClick={() => { setIsEditingName(false); setBroodName(brood?.name || 'New Brood'); }}
-                                className="p-2 bg-gray-500 text-white ml-2 rounded-lg hover:bg-gray-600 transition"
-                                title="Cancel Edit"
-                            >
-                                <X className="w-6 h-6" />
-                            </button>
-                        </>
-                    ) : (
-                        <div className="flex items-center">
-                            <span className="text-2xl font-bold text-gray-900 mr-3">{broodName}</span>
-                            <button
-                                onClick={() => setIsEditingName(true)}
-                                className="p-1 bg-indigo-100 text-indigo-600 rounded-full hover:bg-indigo-200 transition"
-                                title="Edit Name"
-                            >
-                                <Edit2 className="w-5 h-5" />
+        // --- STATE MANAGEMENT ---
+
+        let activeTab = 'home';
+        let selectedFormationName = 'Select a Formation';
+        let swarmFormations = []; 
+        
+        // --- RENDER FUNCTIONS ---
+
+        function setActiveTab(tabName) {
+            activeTab = tabName;
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active-tab');
+            });
+            document.getElementById(`tab-${tabName}`).classList.add('active-tab');
+            renderContent();
+        }
+
+        function renderContent() {
+            const contentDiv = document.getElementById('content');
+            contentDiv.innerHTML = ''; 
+
+            switch(activeTab) {
+                case 'home':
+                    renderHome();
+                    break;
+                case 'army-build':
+                    renderArmyBuild();
+                    break;
+                case 'roster':
+                    renderRoster();
+                    break;
+            }
+        }
+
+        function renderHome() {
+            const contentDiv = document.getElementById('content');
+            contentDiv.innerHTML = `
+                <div class="card p-6 rounded-xl space-y-4 mb-6">
+                    <h2 class="text-2xl font-semibold text-green-300">Welcome to the Hive War Army Builder</h2>
+                    <p class="text-gray-400">
+                        Use this tool to plan and manage your Tyranid army lists for the Hive War variant of Legions Imperialis.
+                    </p>
+                    <p class="text-gray-400">
+                        Start by selecting the **Army Build** tab to define your Swarm Formation and add units.
+                    </p>
+                    <p class="text-sm text-gray-500">
+                        This application is a fan-made utility for the Tyranid Hive War Supplement.
+                    </p>
+                </div>
+            `;
+        }
+
+        function renderArmyBuild() {
+            const contentDiv = document.getElementById('content');
+            let html = `
+                <div class="card p-6 rounded-xl space-y-8">
+                    <h2 class="text-3xl font-extrabold text-green-300">Army Detachment Setup</h2>
+
+                    <div class="space-y-4 border-b border-gray-700 pb-6">
+                        <h3 class="text-xl font-semibold text-white">Add New Swarm Formation (Detachment)</h3>
+                        <div class="flex flex-col md:flex-row md:items-end gap-4">
+                            <div class="flex-1 space-y-2">
+                                <label for="formation-select" class="block text-lg font-medium text-gray-300">Formation Name:</label>
+                                <select id="formation-select" 
+                                    class="w-full p-3 border border-gray-600 rounded-lg bg-gray-700 text-white focus:ring-green-500 focus:border-green-500"
+                                        onchange="updateSelectedFormation(this.value)">
+                                    ${Object.keys(SWARM_FORMATIONS).map(formation =>
+                                        `<option value="${formation}" ${formation === selectedFormationName ?
+                                            'selected' : ''}>${formation}</option>`
+                                    ).join('')}
+                                </select>
+                            </div>
+                            <button 
+                                id="add-formation-btn"
+                                class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-200 disabled:opacity-50"
+                                onclick="addFormationToRoster()"
+                                ${selectedFormationName === 'Select a Formation' ?
+                                    'disabled' : ''}>
+                                Add Formation
                             </button>
                         </div>
-                    )}
+
+                        <div id="formation-slots-display" class="pt-4 border-t border-gray-700 mt-4">
+                            </div>
+                    </div>
+
+                    <div class="space-y-6">
+                        <h3 class="text-2xl font-bold text-white border-b border-gray-700 pb-2">Active Detachments (${swarmFormations.length})</h3>
+                        ${swarmFormations.length === 0 
+                            ?
+                            '<p class="text-gray-400 italic">No formations added yet. Use the selector above to begin building your army.</p>'
+                            : swarmFormations.map((f, index) => renderFormationCard(f, index)).join('')
+                        }
+                    </div>
                 </div>
-                <div className="flex-shrink-0 text-2xl font-extrabold text-indigo-700 bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-300">
-                    Total Points: <span className="font-mono">{totalBroodPoints}</span>
+            `;
+
+            contentDiv.innerHTML = html;
+            updateFormationSlots();
+        }
+
+        function renderRoster() {
+            const contentDiv = document.getElementById('content');
+            let totalArmyPoints = 0;
+            swarmFormations.forEach(f => {
+                [...f.compulsory, ...f.optional].forEach(slot => {
+                    slot.units.forEach(unit => {
+                        totalArmyPoints += unit.totalCost;
+                    });
+                });
+            });
+
+            contentDiv.innerHTML = `
+                <div class="card p-6 rounded-xl space-y-4">
+                    <h2 class="text-2xl font-semibold text-green-300">Current Army Roster</h2>
+                    <h3 class="text-3xl font-bold text-white mt-4 mb-4">Total Points: ${totalArmyPoints} pts</h3>
+                    
+                    <div class="mt-4">
+                        <h3 class="text-2xl font-bold text-white border-b border-gray-700 pb-2 mb-4">Army Special Rules Compendium</h3>
+                        <div class="p-4 bg-gray-700 rounded-lg max-h-64 overflow-y-auto custom-scrollbar">
+                            <p class="text-yellow-400 mb-2">Note: Detailed unit rule explanations will be added here once provided.</p>
+                            ${Object.entries(SWARM_SPECIAL_RULES).map(([name, desc]) => `
+                                <div class="mb-3 p-2 bg-gray-800 rounded">
+                                    <h5 class="text-md font-bold text-green-300">${name} (Formation Rule)</h5>
+                                    <p class="text-sm text-gray-400">${desc}</p>
+                                </div>
+                            `).join('')}
+                            <div class="mb-3 p-2 bg-gray-800 rounded">
+                                <h5 class="text-md font-bold text-green-300">Unit Special Rules (e.g., Burrow, Titan, Rending)</h5>
+                                <p class="text-sm text-gray-400">Placeholder for unit-specific rule definitions.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="text-gray-400 mt-6 pt-4 border-t border-gray-700">
+                        This section lists all units and their customisations across all ${swarmFormations.length} formations.
+                    </p>
+                    
+                    <div class="p-4 bg-gray-700 rounded-lg custom-scrollbar max-h-96 overflow-y-auto">
+                        ${swarmFormations.length === 0 ? 
+                            '<p class="text-gray-500 italic">No formations added yet.</p>' 
+                            : swarmFormations.map((f, index) => `
+                                <div class="mb-6 pb-4 border-b border-gray-600 last:border-b-0">
+                                    <h4 class="text-xl font-bold text-green-400">${index + 1}. ${f.name}</h4>
+                                    ${renderAddedUnitsRoster(f)} 
+                                </div>
+                            `).join('')
+                        }
+                    </div>
+
                 </div>
-            </div>
+            `;
+        }
 
-            {/* Row 2: Swarm Selection and Add Button */}
-            <div className="flex flex-col sm:flex-row gap-4 items-stretch pt-4 border-t border-gray-100">
-                <select
-                    value={selectedSwarmId}
-                    onChange={(e) => setSelectedSwarmId(e.target.value)}
-                    className="flex-grow p-3 border border-gray-300 rounded-lg bg-white text-gray-700 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"
-                >
-                    <option value="" disabled>Select Swarm Type to Add...</option>
-                    {MOCK_SWARMS.map(swarm => (
-                        <option key={swarm.id} value={swarm.id}>
-                            {swarm.name} ({getModelPoints(swarm.id)} pts/model) - {swarm.traits}
-                        </option>
-                    ))}
-                </select>
+        // --- FORMATION MANAGEMENT LOGIC ---
 
-                <button
-                    onClick={handleAddSwarm}
-                    disabled={!selectedSwarmId}
-                    className="flex-shrink-0 flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                >
-                    <Plus className="w-5 h-5" />
-                    Add Swarm
-                </button>
-            </div>
-        </div>
+        function updateSelectedFormation(name) {
+            selectedFormationName = name;
+            renderArmyBuild();
+        }
+
+        function addFormationToRoster() {
+            if (selectedFormationName === 'Select a Formation') return;
+            const template = SWARM_FORMATIONS[selectedFormationName];
+            const newFormation = {
+                id: Date.now(),
+                name: selectedFormationName,
+                // Ensure units array is added to slots when initializing
+                compulsory: template.compulsory.map(slot => ({ ...slot, current: 0, units: [] })),
+                optional: template.optional.map(slot => ({ ...slot, current: 0, units: [] })),
+                special: template.special,
+                formationRule: template.formationRule, 
+                isExpanded: true,
+                editingUnitId: null 
+            };
+            swarmFormations.push(newFormation);
+            
+            selectedFormationName = 'Select a Formation';
+            renderArmyBuild();
+        }
+
+        function removeFormation(id) {
+            const indexToRemove = swarmFormations.findIndex(f => f.id === id);
+            if (indexToRemove !== -1) {
+                swarmFormations.splice(indexToRemove, 1);
+            }
+            renderArmyBuild();
+        }
+        
+        // --- PREVIEW RENDERING (for un-added formation at the top) ---
+
+        function createSlotList(title, slots, typeColor, maxColor) {
+            if (slots.length === 0) return '';
+            const listItems = slots.map(slot => `
+                <li class="flex justify-between py-1 border-b border-gray-600 last:border-b-0">
+                    <span class="font-medium ${typeColor}">${slot.type}</span>
+                    <span class="text-sm ${maxColor}">Max: ${slot.max} Broods</span>
+                </li>
+            `).join('');
+
+            return `
+                <div>
+                    <h3 class="text-xl font-bold mb-2 ${typeColor} capitalize">${title} Slots</h3>
+                    <ul class="space-y-1 p-3 rounded-lg bg-gray-800">
+                        ${listItems}
+                    </ul>
+                </div>
+            `;
+        }
+
+        function updateFormationSlots() {
+            const display = document.getElementById('formation-slots-display');
+            const currentName = selectedFormationName; 
+
+            if (!display) return;
+
+            if (currentName === 'Select a Formation') {
+                 display.innerHTML = '<p class="text-gray-400">Please select a Swarm Formation to see the required unit slots.</p>';
+                return;
+            }
+
+            const formation = SWARM_FORMATIONS[currentName];
+            let html = `
+                <h3 class="text-xl font-bold mb-4 text-white">Previewing ${currentName} Requirements</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            `;
+            html += createSlotList('compulsory', formation.compulsory, 'text-red-400', 'text-red-300');
+            html += createSlotList('optional', formation.optional, 'text-blue-400', 'text-blue-300');
+            
+            html += '</div>'; // End grid
+
+            // Formation Special Rule Preview
+            if (formation.formationRule) {
+                const ruleName = formation.formationRule;
+                const ruleDesc = SWARM_SPECIAL_RULES[ruleName];
+                html += `
+                    <div class="mt-6 p-4 bg-yellow-900/30 border border-yellow-700/50 rounded-lg">
+                        <h4 class="text-lg font-semibold text-yellow-300 mb-1">Formation Rule: ${ruleName}</h4>
+                        <p class="text-yellow-200">${ruleDesc}</p>
+                    </div>
+                `;
+            }
+
+            // Special Slot Restriction Preview
+            if (formation.special) {
+                html += `
+                    <div class="mt-6 p-4 bg-red-900/30 border border-red-700/50 rounded-lg">
+                        <h4 class="text-lg font-semibold text-red-300 mb-1">Special Slot Restriction</h4>
+                        <p class="text-red-200">${formation.special}</p>
+                    </div>
+                `;
+            }
+
+            display.innerHTML = html;
+        }
+
+        // --- ACTIVE FORMATION CARD RENDERING ---
+
+        function toggleFormationExpansion(id) {
+            const formation = swarmFormations.find(f => f.id === id);
+            if (formation) {
+                formation.isExpanded = !formation.isExpanded;
+                renderArmyBuild();
+            }
+        }
+
+        // Get rules explicitly listed in the formation slots or general rule
+        function getFormationRules(formation) {
+            const rulesMap = {};
+            
+            // 1. Get rules from slots
+            const allSlots = [...formation.compulsory, ...formation.optional];
+            allSlots.forEach(slot => {
+                if (slot.rules) {
+                    slot.rules.forEach(ruleName => {
+                        rulesMap[ruleName] = SWARM_SPECIAL_RULES[ruleName];
+                    });
+                }
+            });
+
+            // 2. Add general formation rule
+            if (formation.formationRule) {
+                const ruleName = formation.formationRule;
+                rulesMap[ruleName] = SWARM_SPECIAL_RULES[ruleName];
+            }
+
+            return rulesMap;
+        }
 
 
-        {/* --- SWARM LIST --- */}
-        <h2 className="text-3xl font-bold text-gray-800 mb-4">Brood Swarms ({brood?.swarms?.length || 0})</h2>
+        /**
+         * Calculates the total number of individual *stands* in a unit,
+         * where a stand is the smallest model increment (e.g., 3 models per stand).
+         * @param {object} unit The custom unit object from the roster.
+         * @param {object} baseTemplate The unit template data.
+         * @returns {number} The total number of model stands.
+         */
+        function getUnitStandCount(unit, baseTemplate) {
+            const baseSize = baseTemplate.stats.baseSize || 1;
+            const modelIncrement = baseTemplate.stats.modelIncrement || 1; 
 
-        <div className="space-y-4">
-          {brood?.swarms && brood.swarms.length > 0 ? (
-            brood.swarms.map(swarm => (
-              <BroodCard key={swarm.id} swarm={swarm} />
-            ))
-          ) : (
-            <div className="text-center p-10 bg-white rounded-xl border-dashed border-2 border-gray-300 text-gray-500">
-              <Zap className='w-10 h-10 mx-auto mb-4 text-gray-400' />
-              <p className='text-lg font-medium'>Your Brood is empty.</p>
-              <p>Add a Swarm using the selector above!</p>
-            </div>
-          )}
-        </div>
+            // Calculate current total models
+            let currentModelCount = baseSize;
+            const currentModelIncreases = unit.purchasedUpgrades.filter(p => p.type === 'MODEL_INCREASE');
+            currentModelCount += currentModelIncreases.length * (modelIncrement);
 
-      </div>
-      <Snackbar message={snackbarMessage} type={snackbarMessage?.type} />
-    </div>
-  );
-}
+            // Divide by modelIncrement to get number of stands/broods.
+            // For Core/Synapse units with baseSize > 1, this is the number of stands.
+            if (baseTemplate.slotType === 'Core' || baseTemplate.slotType === 'Synapse') {
+                 // For Core, the stands are the size divided by the increment (e.g., 3 models per stand)
+                 // This assumes baseSize and modelIncrement are a multiple.
+                 return currentModelCount / modelIncrement; 
+            }
+            // For other units (e.g., Monster/Titan), the unit *is* the stand (base 1, increment 1 for additions).
+            return 1 + unit.purchasedUpgrades.filter(p => p.type === 'UNIT_ADDITION').length; 
+        }
 
-export default App;
+        // Renders an individual unit card inside a slot (Army Build view) or Roster view
+        function renderUnitCard(formation, unit, isRosterView = false) {
+            const isEditing = !isRosterView && (formation.editingUnitId === unit.id);
+            const baseTemplate = getUnitTemplate(unit.name);
+            if (!baseTemplate) return '';
+            
+            // --- Collect all unit changes (WEAPON LOGIC IS DUPLICATED HERE FOR ROSTER VIEW) ---
+            let currentRules = [...baseTemplate.rules];
+            let currentStats = { ...baseTemplate.stats };
+            let finalWeapons = [...baseTemplate.baseWeapons];
+
+            // 1. Process PROFILE_CHANGE upgrades first (e.g., Swarm Lord)
+            const profileUpgrades = unit.purchasedUpgrades.filter(p => p.type === 'PROFILE_CHANGE');
+            let removedWeapons = [];
+
+            profileUpgrades.forEach(upg => {
+                // Apply stat updates
+                if (upg.profileUpdates) {
+                    currentStats = { ...currentStats, ...upg.profileUpdates };
+                }
+                // Add new rules
+                if (upg.rules) {
+                    currentRules.push(...upg.rules);
+                }
+                // Mark base weapon for removal
+                if (upg.removesWeapon) {
+                    removedWeapons.push(upg.removesWeapon);
+                }
+            });
+
+            // Filter out weapons marked for removal
+            finalWeapons = finalWeapons.filter(w => !removedWeapons.includes(w.name));
+
+
+            // 2. Get current Model Count and Stand Count (based on MODEL_INCREASE upgrades)
+            
+            // Get current Model Count
+            let currentModelCount = currentStats.baseSize || 1;
+            const currentModelIncreases = unit.purchasedUpgrades.filter(p => p.type === 'MODEL_INCREASE');
+            currentModelCount += currentModelIncreases.length * (currentStats.modelIncrement || 1);
+            
+            // Get current Stand Count
+            const currentStandCount = getUnitStandCount(unit, baseTemplate);
+            
+            
+            // 3. Process WARGEAR/WARGEAR_RULE/PSYCHIC_POWER upgrades (Add rules and cost only)
+            unit.purchasedUpgrades.forEach(upg => {
+                if (upg.type === 'WARGEAR_RULE' || upg.type === 'PSYCHIC_POWER') {
+                    // Avoid duplicate rules
+                    if (upg.rule && !currentRules.includes(upg.rule)) {
+                        currentRules.push(upg.rule);
+                    }
+                }
+            });
+            
+            // 4. Process WEAPON upgrades (replacements per stand)
+            
+            // Create a list of all current base weapons and their remaining stands
+            let remainingStandsMap = {};
+            finalWeapons.forEach(w => {
+                 // For the purpose of tracking upgrades, non-infantry units are considered 1 stand
+                const isInfantry = baseTemplate.slotType === 'Core' || baseTemplate.slotType === 'Synapse';
+                remainingStandsMap[w.name] = isInfantry ? currentStandCount : 1; 
+            });
+
+
+            const allWeaponUpgrades = unit.purchasedUpgrades.filter(p => p.type === 'WEAPON');
+            let finalWeaponsForDisplay = [];
+            
+            // Add replacement weapons and deduct stands from remaining map
+            allWeaponUpgrades.forEach(upg => {
+                finalWeaponsForDisplay.push({ 
+                    ...upg.weaponData, 
+                    name: `${upg.weaponData.name} (x${upg.standsAffected || 1} Stands)` 
+                });
+                
+                const baseWeaponName = upg.originalWeaponName;
+                if (remainingStandsMap[baseWeaponName] !== undefined) {
+                    remainingStandsMap[baseWeaponName] -= upg.standsAffected || 1;
+                }
+            });
+
+            // Add remaining base weapons to the list
+            finalWeapons.forEach(baseWeapon => {
+                const remaining = remainingStandsMap[baseWeapon.name];
+                if (remaining > 0) {
+                    finalWeaponsForDisplay.push({ 
+                        ...baseWeapon, 
+                        name: `${baseWeapon.name} (x${remaining} Stands)` 
+                    });
+                }
+            });
+            
+            // Set the final list for display
+            const displayedWeapons = finalWeaponsForDisplay;
+
+            // --- Roster View Details ---
+            const rosterDetailsHtml = isRosterView ? `
+                <div class="p-3 pt-2 space-y-3">
+                    <div class="bg-gray-800 p-3 rounded-lg">
+                        <h5 class="text-sm font-bold text-green-300 mb-2">Unit Profile & Special Rules</h5>
+                        <div class="grid grid-cols-7 text-center text-xs font-semibold mb-2 text-gray-400 border-b border-gray-600 pb-1">
+                            <span>Type (Scale)</span>
+                            <span>Size (Models)</span>
+                            <span>Stands</span>
+                            <span>M</span>
+                            <span>Sv</span>
+                            <span>CAF</span>
+                            <span>W</span>
+                        </div>
+                        <div class="grid grid-cols-7 text-center text-sm font-bold text-white">
+                            <span>${baseTemplate.unitSubType} (${currentStats.scaleSize})</span>
+                            <span>${currentModelCount}</span>
+                            <span>${currentStandCount}</span>
+                            <span>${currentStats.M}</span>
+                            <span>${currentStats.Sv}</span>
+                            <span>${currentStats.CAF}</span>
+                            <span>${currentStats.W}</span>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <h6 class="text-xs font-semibold text-gray-400 mb-1">Rules:</h6>
+                            <p class="text-xs text-white">${[...new Set(currentRules)].join(' | ')}</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-gray-800 p-3 rounded-lg">
+                        <h5 class="text-sm font-bold text-green-300 mb-2">Weapons</h5>
+                        <div class="space-y-1">
+                        ${displayedWeapons.length > 0 ? displayedWeapons.map(w => `
+                            <div class="text-xs text-white grid grid-cols-5 border-b border-gray-700/50 pb-1">
+                                <span class="font-semibold col-span-1">${w.name}</span>
+                                <span>${w.range}</span>
+                                <span>${w.dice}</span>
+                                <span>${w.toHit}</span>
+                                <span class="col-span-1 text-right">${w.traits} (${w.AP} AP)</span>
+                            </div>
+                        `).join('') : '<p class="text-xs text-gray-400">No weapons equipped.</p>'}
+                        </div>
+                    </div>
+                    
+                    ${unit.purchasedUpgrades.length > 0 ? `
+                        <div class="bg-gray-800 p-3 rounded-lg">
+                            <h5 class="text-sm font-bold text-green-300 mb-2">Chosen Upgrades (${unit.purchasedUpgrades.length})</h5>
+                            <ul class="space-y-1">
+                                ${unit.purchasedUpgrades.map(upg => `
+                                    <li class="text-xs text-gray-400 flex justify-between">
+                                        <span>
+                                            ${upg.name} 
+                                            ${upg.type === 'WEAPON' ? `(x${upg.standsAffected || 1} Stands)` : ''}
+                                            (${upg.type.replace('_', ' ')})
+                                        </span>
+                                        <span class="text-green-400">+${upg.cost} pts</span>
+                                    </li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+
+                </div>
+            ` : '';
+
+            // --- Unit Card Structure (Army Build View) ---
+            return `
+                <li class="bg-gray-800 rounded-md shadow-lg ${isEditing ? 'ring-2 ring-green-400' : ''}">
+                    <div class="p-3 flex justify-between items-center ${isRosterView || isEditing ? '' : 'border-b border-gray-700/50'}">
+                        <span class="font-medium text-white">${unit.name} (Stands: ${currentStandCount}, Models: ${currentModelCount})</span>
+                        <div class="flex items-center gap-3">
+                            <span class="text-base text-green-400 font-bold">${unit.totalCost} pts}</span>
+                            ${!isRosterView ? `
+                                <button 
+                                    class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-medium py-1 px-2 rounded-lg"
+                                    onclick="toggleUnitEditor(${formation.id}, ${unit.id})">
+                                    ${isEditing ? 'Close Edit' : 'Edit'}
+                                </button>
+                                <button 
+                                    class="bg-red-500 hover:bg-red-600 text-white text-xs font-medium py-1 px-2 rounded-lg"
+                                    onclick="removeUnitFromFormation(${formation.id}, ${unit.id})">
+                                    Remove
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                    
+                    ${rosterDetailsHtml}
+
+                    ${isEditing ? renderUnitEditor(formation.id, unit) : ''}
+                    
+                </li>
+            `;
+        }
+
+        // Renders the list of all individual broods added for a specific slot in Army Build view
+        function renderUnitsForSlot(formation, slot) {
+            if (slot.units.length === 0) return '';
+            
+            return `
+                <div class="mt-3">
+                    <ul class="space-y-2">
+                        ${slot.units.map(unit => renderUnitCard(formation, unit)).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+
+        // Renders the list of all individual broods added for the Roster view (different implementation)
+        function renderAddedUnitsRoster(formation) {
+            let unitsHtml = '';
+            let totalBroods = 0;
+            
+            const allSlots = [...formation.compulsory, ...formation.optional];
+
+            allSlots.forEach(slot => {
+                if (slot.units.length > 0) {
+                    totalBroods += slot.units.length;
+                    unitsHtml += `
+                        <div class="mb-4 pl-4 border-l-2 border-gray-500">
+                            <h5 class="text-lg font-semibold text-white border-b border-gray-600 pb-1">${slot.type} Broods Added (${slot.units.length}):</h5>
+                            <div class="mt-3">
+                                <ul class="space-y-4">
+                                    ${slot.units.map(unit => renderUnitCard(formation, unit, true)).join('')}
+                                </ul>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            if (totalBroods === 0) {
+                return `<p class="text-gray-400 italic">No units added to this formation yet.</p>`;
+            }
+
+            return unitsHtml;
+        }
+
+        function renderFormationCard(formation, index) {
+            
+            const renderSlotGroup = (title, slots, isCompulsory) => {
+                const color = isCompulsory ? 'border-red-500' : 'border-blue-500';
+                const textColor = isCompulsory ? 'text-red-400' : 'text-blue-400';
+                return `
+                    <div class="bg-gray-800 p-4 rounded-lg shadow-inner border-l-4 ${color}">
+                        <h4 class="text-lg font-bold mb-3 ${textColor}">${title}</h4>
+                        <div class="flex flex-col gap-4">
+                        ${slots.map(slot => {
+                            const eligibleUnits = TYRANID_UNITS_DATA.filter(u => u.slotType === slot.type);
+                            // Ensure the select ID is URL-friendly
+                            const selectId = `unit-select-${formation.id}-${isCompulsory}-${slot.type.replace(/\s/g, '-')}`;
+
+                            return `
+                                <div class="bg-gray-900 p-3 rounded-md hover:bg-gray-900/80 transition duration-150">
+                                    <div class="flex justify-between items-center mb-2">
+                                        <span class="text-lg text-white font-medium">${slot.type}</span>
+                                        <span class="text-gray-300">
+                                            Added: <span class="font-bold text-xl">${slot.current}</span> / Max: ${slot.max}
+                                        </span>
+                                    </div>
+                                    
+                                    ${eligibleUnits.length > 0 ? `
+                                    <div class="flex gap-2 mt-3">
+                                        <select id="${selectId}" class="w-full p-2 border border-gray-600 rounded-lg bg-gray-700 text-white focus:ring-green-500 focus:border-green-500 text-sm">
+                                            <option value="">-- Select ${slot.type} unit --</option>
+                                            ${eligibleUnits.map(unit => 
+                                                `<option value="${unit.name}">${unit.name} (${unit.cost} pts)</option>`
+                                            ).join('')}
+                                        </select>
+                                        <button 
+                                            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg text-sm"
+                                            onclick="addUnitToFormation(${formation.id}, '${slot.type}', ${isCompulsory}, document.getElementById('${selectId}'))">
+                                            Add
+                                        </button>
+                                    </div>
+                                    ` : `<p class="text-sm text-gray-500 italic">No units defined for this slot type.</p>`}
+
+                                    ${renderUnitsForSlot(formation, slot)}
+                                </div>
+                            `
+                        }).join('')}
+                        </div>
+                    </div>
+                `;
+            };
+
+            // Only get rules conditional to this formation
+            const formationRules = getFormationRules(formation);
+
+            return `
+                <div class="card p-4 rounded-xl space-y-4 border border-gray-700">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-2xl font-bold text-green-400 cursor-pointer hover:text-green-300 transition duration-150" onclick="toggleFormationExpansion(${formation.id})">
+                        ${index + 1}.
+                        ${formation.name}
+                            <span class="ml-2 inline-block transition-transform duration-300 ${formation.isExpanded ? 'rotate-90' : 'rotate-0'}">&#9658;</span>
+                        </h3>
+                        <button 
+                            class="bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition duration-200"
+                            onclick="removeFormation(${formation.id})">
+                            Remove
+                        </button>
+                    </div>
+
+                    ${formation.isExpanded ?
+                    `
+                        <div id="formation-details-${formation.id}" class="space-y-6 pt-4">
+
+                            ${Object.keys(formationRules).length > 0 ? `
+                                <div class="p-4 bg-gray-900/50 rounded-lg border border-gray-700">
+                                    <h4 class="text-lg font-semibold text-green-300 mb-2">Formation Special Rules:</h4>
+                                    <ul class="space-y-1 list-disc list-inside text-gray-400">
+                                        ${Object.entries(formationRules).map(([name, desc]) => `
+                                            <li><strong class="text-white">${name}:</strong> ${desc}</li>
+                                        `).join('')}
+                                    </ul>
+                                </div>
+                            ` : ''}
+
+                            <h4 class="text-xl font-semibold text-white">Unit Slot Allocation:</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                ${formation.compulsory.length > 0 ?
+                                renderSlotGroup('Compulsory Slots', formation.compulsory, true) : ''}
+                                ${formation.optional.length > 0 ?
+                                renderSlotGroup('Optional Slots', formation.optional, false) : ''}
+                            </div>
+                            
+                            ${formation.special ?
+                            `
+                                <div class="p-4 bg-yellow-900/30 border border-yellow-700/50 rounded-lg">
+                                    <h5 class="text-lg font-semibold text-yellow-300 mb-1">Special Slot Restriction</h5>
+                                    <p class="text-red-200">${formation.special}</p>
+                                </div>
+                            ` : ''}
+
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+
+        // --- UNIT MANAGEMENT LOGIC ---
+
+        function addUnitToFormation(formationId, slotType, isCompulsory, selectElement) {
+            const selectedUnitName = selectElement.value;
+            if (!selectedUnitName) {
+                alert("Please select a unit type first.");
+                return;
+            }
+
+            const unitTemplate = getUnitTemplate(selectedUnitName);
+            const formation = swarmFormations.find(f => f.id === formationId);
+
+            if (!formation || !unitTemplate) return;
+
+            const slotArray = isCompulsory ? formation.compulsory : formation.optional;
+            const targetSlot = slotArray.find(s => s.type === slotType);
+
+            if (!targetSlot || !(targetSlot.current < targetSlot.max)) {
+                alert(`Cannot add ${unitTemplate.name}: Max slots reached for ${slotType} in this formation.`);
+                return;
+            }
+
+            // Unit Data Structure
+            const newUnitEntry = {
+                id: Date.now() + Math.random(), 
+                name: unitTemplate.name,
+                baseCost: unitTemplate.cost,
+                slotType: slotType,
+                purchasedUpgrades: [], 
+                totalCost: unitTemplate.cost 
+            };
+
+            targetSlot.units.push(newUnitEntry);
+            targetSlot.current++; 
+
+            // Reset dropdown
+            selectElement.value = "";
+            
+            renderArmyBuild(); 
+        }
+
+        function removeUnitFromFormation(formationId, unitId) {
+            const formation = swarmFormations.find(f => f.id === formationId);
+            if (!formation) return;
+
+            const unitIdNum = parseFloat(unitId); 
+            const allSlots = [...formation.compulsory, ...formation.optional];
+            
+            for (const slot of allSlots) {
+                const indexToRemove = slot.units.findIndex(u => u.id === unitIdNum);
+                
+                if (indexToRemove !== -1) {
+                    slot.units.splice(indexToRemove, 1);
+                    slot.current--;
+                    
+                    if (formation.editingUnitId === unitIdNum) {
+                        formation.editingUnitId = null;
+                    }
+                    
+                    renderArmyBuild();
+                    return;
+                }
+            }
+        }
+
+        // --- UNIT UPGRADE/WARGEAR LOGIC ---
+        
+        // Helper function to find a unit by its ID
+        function findUnitById(unitId) {
+            for (const formation of swarmFormations) {
+                const allSlots = [...formation.compulsory, ...formation.optional];
+                for (const slot of allSlots) {
+                    const unit = slot.units.find(u => u.id === unitId);
+                    if (unit) {
+                        return { unit, formation };
+                    }
+                }
+            }
+            return { unit: null, formation: null };
+        }
+
+        // Helper to recalculate total cost
+        function recalculateBroodCost(unit) {
+            let newTotal = unit.baseCost;
+            unit.purchasedUpgrades.forEach(u => newTotal += u.cost);
+            unit.totalCost = newTotal;
+        }
+
+        function toggleUnitEditor(formationId, unitId) {
+            const formation = swarmFormations.find(f => f.id === formationId);
+            if (!formation) return;
+
+            if (formation.editingUnitId === unitId) {
+                formation.editingUnitId = null; 
+            } else {
+                formation.editingUnitId = unitId; 
+            }
+            renderArmyBuild();
+        }
+
+        function renderUnitEditor(formationId, unit) {
+            const baseTemplate = getUnitTemplate(unit.name);
+            const availableUpgrades = baseTemplate.upgrades;
+
+            // Group current purchases by type
+            const currentWeapons = unit.purchasedUpgrades.filter(p => p.type === 'WEAPON');
+            const currentUnitAdditions = unit.purchasedUpgrades.filter(p => p.type === 'UNIT_ADDITION'); 
+            const currentModelIncreases = unit.purchasedUpgrades.filter(p => p.type === 'MODEL_INCREASE');
+            const currentProfileChanges = unit.purchasedUpgrades.filter(p => p.type === 'PROFILE_CHANGE');
+            const currentWargear = unit.purchasedUpgrades.filter(p => p.type === 'WARGEAR' || p.type === 'WARGEAR_RULE' || p.type === 'PSYCHIC_POWER');
+            
+            // Get the current stand count
+            const currentStandCount = getUnitStandCount(unit, baseTemplate);
+            
+            // Collect all base weapon names currently equipped
+            let currentBaseWeapons = baseTemplate.baseWeapons.map(w => w.name);
+            // Deduct weapons removed by PROFILE_CHANGE (e.g., Swarm Lord removes HVC)
+            currentProfileChanges.forEach(upg => {
+                if (upg.removesWeapon) {
+                    currentBaseWeapons = currentBaseWeapons.filter(name => name !== upg.removesWeapon);
+                }
+            });
+
+
+            // Helper function to render a category selector (for non-weapon upgrades)
+            const renderUpgradeCategory = (categoryTypes, categoryTitle, currentItems, baseUnitStats) => {
+                const typesArray = Array.isArray(categoryTypes) ? categoryTypes : [categoryTypes];
+                
+                // Exclude 'WEAPON' types from this general function
+                if(typesArray.includes('WEAPON')) return ''; 
+
+                const availableItems = availableUpgrades.filter(upg => {
+                    // 1. Filter by type
+                    if (!typesArray.includes(upg.type)) return false;
+
+                    // 2. Check maximums for MODEL_INCREASE
+                    if (upg.type === 'MODEL_INCREASE') {
+                        return currentItems.length < (upg.max || 1);
+                    }
+
+                    // 3. Allow UNIT_ADDITION to be added multiple times
+                    if (upg.type === 'UNIT_ADDITION') return true;
+                    
+                    // 4. WARGEAR/WARGEAR_RULE/PROFILE_CHANGE/PSYCHIC_POWER - Check for unique upgrades
+                    if (upg.type === 'WARGEAR' || upg.type === 'WARGEAR_RULE' || upg.type === 'PROFILE_CHANGE' || upg.type === 'PSYCHIC_POWER') {
+                        return !currentItems.some(i => i.name === upg.name);
+                    }
+
+                    return false;
+                });
+                
+                // Declare and compute modelIncreaseDisplay before the exit check
+                let modelIncreaseDisplay = '';
+                if (typesArray.includes('MODEL_INCREASE') && baseUnitStats && baseUnitStats.baseSize) {
+                    const modelIncrement = baseUnitStats.modelIncrement || 1;
+                    const baseSize = baseUnitStats.baseSize;
+                    const maxSize = baseUnitStats.maxSize || '?';
+                    const currentTotal = baseSize + (currentItems.length * modelIncrement);
+                    modelIncreaseDisplay = `<p class="text-xs text-gray-400 mb-1">Current Models: ${currentTotal} / ${maxSize}. Increments Added: ${currentItems.length}.</p>`;
+                }
+
+                // Check for early exit
+                if (currentItems.length === 0 && availableItems.length === 0 && !modelIncreaseDisplay) return '';
+                
+                // Get a URL-friendly type name for the select ID
+                const selectType = typesArray[0].replace('_', '-').toLowerCase();
+
+
+                return `
+                    <div class="mb-4">
+                        <h4 class="text-sm font-bold text-gray-300 mb-2 border-b border-gray-700 pb-1">${categoryTitle}</h4>
+                        ${modelIncreaseDisplay}
+                        
+                        <ul class="space-y-1 mb-2">
+                            ${currentItems.map(upg => `
+                                <li class="flex justify-between items-center text-sm bg-gray-700 p-2 rounded">
+                                    <span>
+                                        ${upg.name} 
+                                        ${upg.type === 'WEAPON' ? `(x${upg.standsAffected || 1} Stands)` : ''}
+                                    </span>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-green-400">+${upg.cost} pts</span>
+                                        <button 
+                                            class="text-red-400 hover:text-red-300 text-xs font-bold"
+                                            onclick="removeUpgradeFromBrood(${formationId}, ${unit.id}, '${upg.id}')">
+                                            (Remove)
+                                        </button>
+                                    </div>
+                                </li>
+                            `).join('')}
+                        </ul>
+
+                        ${availableItems.length > 0 ? `
+                        <div class="flex gap-2 mt-3">
+                            <select id="upgrade-select-${unit.id}-${selectType}" class="flex-1 w-full p-2 border border-gray-600 rounded-lg bg-gray-900 text-white focus:ring-green-500 focus:border-green-500 text-sm">
+                                <option value="">-- Add new ${categoryTitle.toLowerCase()} --</option>
+                                ${availableItems.map(upg => `
+                                    <option value="${upg.name}">${upg.name} (+${upg.cost} pts)</option>
+                                `).join('')}
+                            </select>
+                            <button 
+                                class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded-lg text-sm"
+                                onclick="addUpgradeToBrood(${formationId}, ${unit.id}, document.getElementById('upgrade-select-${unit.id}-${selectType}').value)">
+                                Add
+                            </button>
+                        </div>
+                        ` : (currentItems.length > 0 || typesArray.includes('MODEL_INCREASE') ? '' : '<p class="text-gray-500 italic text-sm">No further options available for this category.</p>')}
+                    </div>
+                `;
+            }
+
+            // --- WEAPON UPGRADE LOGIC (Refactored to handle multiple base weapons) ---
+            let weaponUpgradeBlocks = '';
+            
+            currentBaseWeapons.forEach(baseWeaponName => {
+                
+                // Find the original weapon data for display purposes
+                const baseWeaponData = baseTemplate.baseWeapons.find(w => w.name === baseWeaponName);
+                if (!baseWeaponData) return;
+
+                // 1. Calculate stands already replaced for this weapon
+                let standsWithReplacement = unit.purchasedUpgrades
+                    .filter(p => p.type === 'WEAPON' && p.originalWeaponName === baseWeaponName)
+                    .reduce((total, upg) => total + (upg.standsAffected || 1), 0);
+
+                const availableStandsForWeaponUpgrade = currentStandCount - standsWithReplacement;
+                
+                // 2. Filter available upgrades for this specific base weapon
+                const availableItems = availableUpgrades.filter(upg => {
+                    return upg.type === 'WEAPON' && upg.originalWeaponName === baseWeaponName;
+                });
+
+                if (availableStandsForWeaponUpgrade > 0 && availableItems.length > 0) {
+                    weaponUpgradeBlocks += `
+                        <div class="mt-3 space-y-2 border-t border-gray-700 pt-3">
+                            <h5 class="text-sm font-semibold text-gray-400">Weapon Replacements for: <span class="text-green-300 font-bold">${baseWeaponName}</span></h5>
+                            <p class="text-xs text-gray-500 mb-2">Available Stands to Upgrade: <span class="text-white">${availableStandsForWeaponUpgrade}</span> / ${currentStandCount}</p>
+                            ${availableItems.map(upg => `
+                                <div class="flex items-end gap-2 bg-gray-900 p-2 rounded">
+                                    <div class="flex-1 space-y-1">
+                                        <label class="text-xs text-white block">
+                                            ${upg.name} (+${upg.cost} pts per Stand)
+                                        </label>
+                                        <div class="flex gap-2">
+                                            <select id="stands-select-${unit.id}-${upg.name.replace(/\s/g, '-')}" class="w-1/2 p-2 border border-gray-700 rounded-lg bg-gray-800 text-white text-sm">
+                                                <option value="">Stands</option>
+                                                ${Array.from({ length: availableStandsForWeaponUpgrade }, (_, i) => i + 1).map(num =>
+                                                    `<option value="${num}">x${num} Stand${num > 1 ? 's' : ''}</option>`
+                                                ).join('')}
+                                            </select>
+                                            <button 
+                                                class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded-lg text-sm w-1/2"
+                                                onclick="addWeaponUpgradeToBrood(${formationId}, ${unit.id}, '${upg.name}', document.getElementById('stands-select-${unit.id}-${upg.name.replace(/\s/g, '-')}').value)">
+                                                Add
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+            });
+
+
+            return `
+                <div class="p-4 bg-gray-800/50">
+                    <h6 class="text-md font-semibold text-white mb-3">Manage Customisation: ${unit.name}</h6>
+                    
+                    ${weaponUpgradeBlocks.length > 0 ? `
+                        <div class="mb-4">
+                            <h4 class="text-sm font-bold text-gray-300 mb-2 border-b border-gray-700 pb-1">Weapon Upgrades (Per Stand)</h4>
+                            <ul class="space-y-1 mb-2">
+                                ${currentWeapons.map(upg => `
+                                    <li class="flex justify-between items-center text-sm bg-gray-700 p-2 rounded">
+                                        <span>
+                                            ${upg.name} (x${upg.standsAffected || 1} Stands)
+                                        </span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-green-400">+${upg.cost} pts</span>
+                                            <button 
+                                                class="text-red-400 hover:text-red-300 text-xs font-bold"
+                                                onclick="removeUpgradeFromBrood(${formationId}, ${unit.id}, '${upg.id}')">
+                                                (Remove)
+                                            </button>
+                                        </div>
+                                    </li>
+                                `).join('')}
+                            </ul>
+                            ${weaponUpgradeBlocks}
+                        </div>
+                    ` : ''}
+
+                    ${renderUpgradeCategory('PROFILE_CHANGE', 'Profile & Exclusive Upgrades', currentProfileChanges)}
+                    ${renderUpgradeCategory('PSYCHIC_POWER', 'Psychic Abilities', currentWargear.filter(upg => upg.type === 'PSYCHIC_POWER'))}
+                    ${renderUpgradeCategory(['WARGEAR', 'WARGEAR_RULE'], 'Wargear/Attached Broods', currentWargear.filter(upg => upg.type !== 'PSYCHIC_POWER'))}
+                    ${renderUpgradeCategory('MODEL_INCREASE', 'Model Count Increase (Stand Size)', currentModelIncreases, baseTemplate.stats)}
+                    ${renderUpgradeCategory('UNIT_ADDITION', 'Unit Additions/Swarm Size', currentUnitAdditions)}
+
+                </div>
+            `;
+        }
+
+        // Adds a selected upgrade to a unit (for non-weapon upgrades)
+        function addUpgradeToBrood(formationId, unitId, upgradeName) {
+            if (!upgradeName) return;
+
+            const { unit, formation } = findUnitById(unitId);
+            if (!unit) return;
+
+            const baseTemplate = getUnitTemplate(unit.name);
+            const upgradeTemplate = baseTemplate.upgrades.find(u => u.name === upgradeName);
+            if (!upgradeTemplate) return;
+
+            // Check for unique WARGEAR/WARGEAR_RULE/PROFILE_CHANGE/PSYCHIC_POWER before adding 
+            const uniqueTypes = ['WARGEAR', 'WARGEAR_RULE', 'PROFILE_CHANGE', 'PSYCHIC_POWER'];
+            if (uniqueTypes.includes(upgradeTemplate.type)) {
+                if (unit.purchasedUpgrades.some(i => i.name === upgradeTemplate.name)) {
+                    alert(`Cannot add ${upgradeName}: This is a unique upgrade.`);
+                    return;
+                }
+            }
+            
+            // Check for profile compatibility (e.g., Swarm Lord removes a weapon, so adding a replacement is invalid)
+            if (upgradeTemplate.type === 'WEAPON') {
+                const profileChanges = unit.purchasedUpgrades.filter(p => p.type === 'PROFILE_CHANGE');
+                const isWeaponRemoved = profileChanges.some(p => p.removesWeapon === upgradeTemplate.originalWeaponName);
+                if (isWeaponRemoved) {
+                     alert(`Cannot add ${upgradeTemplate.name}: The base weapon (${upgradeTemplate.originalWeaponName}) was removed by a Profile Upgrade (e.g., Swarm Lord).`);
+                    return;
+                }
+            }
+
+
+            const newUpgrade = {
+                ...upgradeTemplate,
+                id: Date.now() + Math.random(), // Unique ID for removal
+            };
+
+            unit.purchasedUpgrades.push(newUpgrade);
+            recalculateBroodCost(unit);
+            
+            formation.editingUnitId = unitId; 
+            renderArmyBuild();
+        }
+
+        // Adds a weapon upgrade (which is applied per stand)
+        function addWeaponUpgradeToBrood(formationId, unitId, upgradeName, standsAffected) {
+            const numStands = parseInt(standsAffected);
+            if (!upgradeName || isNaN(numStands) || numStands <= 0) {
+                 alert("Please select a weapon upgrade and the number of stands to apply it to.");
+                 return;
+            }
+
+            const { unit, formation } = findUnitById(unitId);
+            if (!unit) return;
+            const baseTemplate = getUnitTemplate(unit.name);
+            const upgradeTemplate = baseTemplate.upgrades.find(u => u.name === upgradeName);
+            if (!upgradeTemplate || upgradeTemplate.type !== 'WEAPON') return;
+
+            const currentStandCount = getUnitStandCount(unit, baseTemplate);
+            const baseWeaponName = upgradeTemplate.originalWeaponName;
+            
+            // Check if the base weapon was removed by a profile change
+            const profileChanges = unit.purchasedUpgrades.filter(p => p.type === 'PROFILE_CHANGE');
+            const isWeaponRemoved = profileChanges.some(p => p.removesWeapon === baseWeaponName);
+            if (isWeaponRemoved) {
+                 alert(`Cannot upgrade ${baseWeaponName}: This weapon was removed by a Profile Upgrade (e.g., Swarm Lord).`);
+                return;
+            }
+            
+
+            let standsWithReplacement = unit.purchasedUpgrades
+                .filter(p => p.type === 'WEAPON' && p.originalWeaponName === baseWeaponName)
+                .reduce((total, upg) => total + (upg.standsAffected || 1), 0);
+
+            if (standsWithReplacement + numStands > currentStandCount) {
+                 alert(`Cannot add ${numStands} stands: only ${currentStandCount - standsWithReplacement} stands are available for upgrade on ${baseWeaponName}.`);
+                 return;
+            }
+            
+            const newUpgrade = {
+                ...upgradeTemplate,
+                id: Date.now() + Math.random(), // Unique ID for removal
+                standsAffected: numStands,
+                cost: upgradeTemplate.cost * numStands // Total cost is cost per stand * number of stands
+            };
+
+            unit.purchasedUpgrades.push(newUpgrade);
+            recalculateBroodCost(unit);
+            
+            // Re-open editor to show new cost/available stands
+            formation.editingUnitId = unitId; 
+            renderArmyBuild();
+        }
+
+
+        // Removes an upgrade from a unit by its unique ID
+        function removeUpgradeFromBrood(formationId, unitId, upgradeId) {
+            const { unit, formation } = findUnitById(unitId);
+            if (!unit) return;
+
+            // We must use a string comparison for the ID as it includes the random part
+            const indexToRemove = unit.purchasedUpgrades.findIndex(upg => upg.id.toString() === upgradeId.toString());
+            
+            if (indexToRemove !== -1) {
+                unit.purchasedUpgrades.splice(indexToRemove, 1);
+                recalculateBroodCost(unit);
+
+                formation.editingUnitId = unitId;
+                renderArmyBuild();
+            }
+        }
+
+
+        // --- INITIALIZATION ---
+        
+        // Render initial content when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            renderContent();
+        });
+    </script>
+
+</body>
+</html>
